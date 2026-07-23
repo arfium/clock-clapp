@@ -1,0 +1,6 @@
+.DS_Store
+native/.build/
+native/build/
+dist/
+*.app/
+*.log

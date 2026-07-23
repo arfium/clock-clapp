@@ -1,0 +1,27 @@
+# CI (KISS): one macOS job that proves the template still builds and packages.
+# The template is macOS/SwiftUI, so CI runs on macОS only. `clatch validate` needs
+# the private Clatch binary, so it is not run here — `swift build` + packaging is
+# the gate.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (release)
+        run: swift build -c release --package-path native
+      - name: Package
+        run: sh scripts/package.sh

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Dev entrypoint: build-if-needed, then exec the real binary. In dist/ this file is
+# REPLACED by the compiled binary (scripts/package.sh).
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+BIN="$ROOT/native/.build/release/clock"
+
+if [ ! -x "$BIN" ]; then
+  (cd "$ROOT/native" && swift build -c release >/dev/null)
+fi
+
+exec "$BIN" "$@"

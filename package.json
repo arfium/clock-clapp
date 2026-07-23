@@ -1,0 +1,15 @@
+{
+  "name": "clock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "clock — a Clatch alarm clock: the agent schedules its own timed wake-ups, the human sets alarms in the GUI.",
+  "scripts": {
+    "build": "swift build -c release --package-path native",
+    "icon": "swift scripts/render-clock-icon.swift",
+    "chime": "swift scripts/render-chime.swift",
+    "package": "scripts/package.sh",
+    "dev-app": "scripts/macos-dev-app.sh",
+    "shortcut:macos": "scripts/macos-shortcut.sh",
+    "cli": "bin/clock"
+  }
+}
