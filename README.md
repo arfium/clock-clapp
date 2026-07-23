@@ -66,15 +66,25 @@ bin/clock cancel t1                    # cancel by id (aN alarm · tN timer)
 bin/clock --help                       # the agent's manual
 ```
 
-Through Clatch, with an agent driving it:
+### Install it for real (end users)
+
+No source checkout — install from a published GitHub release:
 
 ```sh
-npm run package
-clatch install dist
+clatch install github:arfium/clock-clapp          # latest release
+clatch install github:arfium/clock-clapp@v0.1.0   # a specific version
+```
+
+(Or download `com.arfium.clock-macos-arm64.clapp` from the repo's **Releases** and
+`clatch install <that file>`.) Then hand it to an agent:
+
+```sh
 clatch run com.arfium.clock
 clatch agent grant <agent-name> app:com.arfium.clock
 clatch agent send <agent-name> "set a timer 2 minutes from now to check on me"
 ```
+
+(Dev-from-source path: `clatch install dist` after `npm run package`.)
 
 ## Keeping it running (there is no autostart)
 
