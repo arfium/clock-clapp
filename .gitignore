@@ -4,3 +4,5 @@ native/build/
 dist/
 *.app/
 *.log
+*.clapp
+*.clapp.sha256
