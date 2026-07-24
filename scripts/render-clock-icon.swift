@@ -8,9 +8,10 @@ import Foundation
 // a fraction of either the canvas or the dial radius R, so it scales cleanly.
 //
 // The three things that make it read as a real clock icon:
-//   • The body is 0.8047 of the canvas, NOT the full canvas. The margin is shadow
-//     and Dock-bounce headroom; fill it and the icon looks oversized next to every
-//     neighbour in the Dock.
+//   • The body is FULL-BLEED (fills the canvas, rounded corners), the shared clapp
+//     icon standard — matching telegram/whatsapp so it reads at the same size in the
+//     Clatch library. (Apple's Dock uses an ~0.80 inset for bounce headroom; the
+//     Clatch library grid wants edge-to-edge, so we fill it.)
 //   • The body is a vertical gradient, not flat black — a pure-black squircle loses
 //     its silhouette on a dark wallpaper.
 //   • ZERO tick marks, twelve upright numerals, and hour/minute hands of IDENTICAL
@@ -29,12 +30,12 @@ NSGraphicsContext.current = ctx
 ctx.imageInterpolation = .high
 
 let C = NSPoint(x: px / 2, y: px / 2)
-let R = px * 0.3491                      // dial radius
+let R = px * 0.4338                      // dial radius (scaled to the full-bleed body)
 let orange = NSColor.systemOrange
 let ink = NSColor.black
 
 // ── body ────────────────────────────────────────────────────────────────────
-let bodySide = px * 0.8047
+let bodySide = px                        // full-bleed (shared clapp icon standard)
 let body = NSBezierPath(roundedRect: NSRect(x: (px - bodySide) / 2, y: (px - bodySide) / 2,
                                             width: bodySide, height: bodySide),
                         xRadius: bodySide * 0.225, yRadius: bodySide * 0.225)
