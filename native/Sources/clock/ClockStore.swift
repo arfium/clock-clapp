@@ -7,9 +7,11 @@ import Combine
 // human via the GUI, the agent via the CLI — so they never drift.
 //
 // A due WAKE alarm fires `alarm.fired` (run → wakes the agent); a --quiet alarm
-// fires `alarm.quiet` (context). A due timer fires `timer.done` (run). Each is
-// TARGETED at exactly the agent who set it (via its CLATCH_AGENT). The GUI plays a
-// chime. Clatch has no cron — this app IS the scheduler while it runs.
+// fires `alarm.quiet` (context). A due timer fires `timer.done` (run). Each alarm
+// carries a `targets` list — the agents it wakes, chosen in the GUI (or `--to` on the
+// CLI) from the roster Clatch pushes on `app.agents`. Empty = broadcast to every bound
+// agent; a CLI alarm defaults to its own setter. The GUI plays a chime. Clatch has no
+// cron — this app IS the scheduler while it runs.
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum Actor { case user, agent }
@@ -29,8 +31,20 @@ final class ClockStore: ObservableObject {
         var repeatDays: Set<Int>      // Calendar weekday 1=Sun … 7=Sat; empty = one-shot
         var enabled: Bool
         var wakeAgent: Bool           // fire wakes the agent (run) vs notify only (context)
-        var agentName: String?        // the CLATCH_AGENT that set it via CLI (nil = human/GUI)
+        var agentName: String?        // the CLATCH_AGENT that set it via CLI (nil = human/GUI) — the owner
+        /// The agents this alarm fires at, by name (the `app.toAgent` target key).
+        /// **Empty = broadcast** to every bound agent. Chosen in the GUI / via `--to`.
+        var targets: [String] = []
         var lastFired: String?        // "yyyyMMddHHmm" guard so it fires once per matching minute
+    }
+
+    /// One bound agent from the roster Clatch pushes on `app.agents` — what the GUI
+    /// offers as a wake target. Replaced wholesale on every push.
+    struct AgentRow: Identifiable, Equatable {
+        var name: String              // the target key
+        var backend: String
+        var model: String?
+        var id: String { name }
     }
 
     struct Countdown: Codable, Identifiable {
@@ -52,6 +66,30 @@ final class ClockStore: ObservableObject {
     @Published private(set) var alarms: [Alarm] = []
     @Published private(set) var timers: [Countdown] = []
     @Published private(set) var now: Date = Date()
+    /// The agents currently bound to this app (Clatch's `app.agents` roster). Drives
+    /// the GUI's wake-target picker; empty when running standalone (no launcher).
+    @Published private(set) var agents: [AgentRow] = []
+
+    /// Replace the roster (called on the main actor from the `app.agents` push).
+    func setAgents(_ rows: [AgentRow]) { agents = rows }
+
+    /// In-memory mock state for the offscreen GUI preview (`clock render`). Dev-only —
+    /// it does NOT persist (no `save()`), so it never touches the real ~/.clock store.
+    func applyPreview() {
+        agents = [AgentRow(name: "alice", backend: "claude-acp", model: "opus"),
+                  AgentRow(name: "bob", backend: "codex-acp", model: nil),
+                  AgentRow(name: "carol", backend: "gemini-acp", model: nil)]
+        alarms = [
+            Alarm(id: "a1", hour: 7, minute: 30, label: "standup", note: "post yesterday's diff to #eng",
+                  repeatDays: [2, 3, 4, 5, 6], enabled: true, wakeAgent: true, agentName: nil,
+                  targets: ["alice", "bob"], lastFired: nil),
+            Alarm(id: "a2", hour: 8, minute: 0, label: "all hands", note: "",
+                  repeatDays: [], enabled: true, wakeAgent: true, agentName: nil, targets: [], lastFired: nil),
+            Alarm(id: "a3", hour: 22, minute: 0, label: "nightly", note: "run the backup",
+                  repeatDays: [1, 2, 3, 4, 5, 6, 7], enabled: false, wakeAgent: true, agentName: nil,
+                  targets: ["bob"], lastFired: nil),
+        ]
+    }
 
     /// (name, target, payload) → control pipe. Set by the app delegate.
     var onSignal: ((String, [String], [String: String]) -> Void)?
@@ -109,9 +147,11 @@ final class ClockStore: ObservableObject {
     private func fireAlarm(_ i: Int, at when: Date) {
         let a = alarms[i]
         let name = a.wakeAgent ? "alarm.fired" : "alarm.quiet"
-        let target = a.agentName.map { [$0] } ?? []
+        // Wake exactly the chosen agents; empty broadcasts to every bound agent.
+        let target = a.targets
         var payload = ["id": a.id, "label": a.label, "at": ISO8601DateFormatter().string(from: when),
-                       "time": String(format: "%02d:%02d", a.hour, a.minute)]
+                       "time": String(format: "%02d:%02d", a.hour, a.minute),
+                       "to": a.targets.isEmpty ? "everyone" : a.targets.joined(separator: ",")]
         // The note rides along as the agent's instruction. On `alarm.fired` (run) it
         // is effectively the prompt for the turn this signal starts; on `alarm.quiet`
         // (context) it is just what got recorded. The signal NAME decides which.
@@ -136,10 +176,14 @@ final class ClockStore: ObservableObject {
 
     @discardableResult
     func addAlarm(hour: Int, minute: Int, label: String, note: String = "", repeatDays: Set<Int>,
-                  wakeAgent: Bool, by actor: Actor, agent: String? = nil) -> Alarm {
+                  wakeAgent: Bool, targets: [String]? = nil, by actor: Actor, agent: String? = nil) -> Alarm {
+        let owner = actor == .agent ? agent : nil
+        // Explicit selection wins; otherwise a CLI alarm wakes its setter, a GUI alarm
+        // broadcasts (empty). Keep only targets that are (or were) real agent names.
+        let resolved = targets ?? (owner.map { [$0] } ?? [])
         let a = Alarm(id: "a\(nextA)", hour: hour, minute: minute, label: label, note: note,
                       repeatDays: repeatDays, enabled: true, wakeAgent: wakeAgent,
-                      agentName: actor == .agent ? agent : nil, lastFired: nil)
+                      agentName: owner, targets: resolved, lastFired: nil)
         nextA += 1
         alarms.append(a)
         sortAlarms()
@@ -158,7 +202,7 @@ final class ClockStore: ObservableObject {
     /// whoever set it stays the one it wakes.
     @discardableResult
     func updateAlarm(id: String, hour: Int, minute: Int, label: String, note: String,
-                     repeatDays: Set<Int>, wakeAgent: Bool) -> Alarm? {
+                     repeatDays: Set<Int>, wakeAgent: Bool, targets: [String]) -> Alarm? {
         guard let i = idxA(id) else { return nil }
         alarms[i].hour = hour
         alarms[i].minute = minute
@@ -166,6 +210,7 @@ final class ClockStore: ObservableObject {
         alarms[i].note = note
         alarms[i].repeatDays = repeatDays
         alarms[i].wakeAgent = wakeAgent
+        alarms[i].targets = targets
         alarms[i].lastFired = nil
         sortAlarms()
         save()
@@ -275,6 +320,9 @@ extension ClockStore.Alarm {
         enabled = try c.decode(Bool.self, forKey: .enabled)
         wakeAgent = try c.decode(Bool.self, forKey: .wakeAgent)
         agentName = try c.decodeIfPresent(String.self, forKey: .agentName)
+        // Added after `targets` shipped: a stored alarm without it keeps its old
+        // behavior — wake its owner, or broadcast if it was human-set.
+        targets = try c.decodeIfPresent([String].self, forKey: .targets) ?? (agentName.map { [$0] } ?? [])
         lastFired = try c.decodeIfPresent(String.self, forKey: .lastFired)
     }
 }

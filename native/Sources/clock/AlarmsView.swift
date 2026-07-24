@@ -104,9 +104,11 @@ struct AlarmRow: View {
                             .foregroundStyle(on ? Palette.fgDim : Palette.fgMute)
                             .help(alarm.note)
                     }
-                    if let owner = alarm.agentName {
+                    // Who it wakes — shown when the alarm targets specific agents
+                    // (a default "everyone" alarm stays clean, Apple-style).
+                    if !alarm.targets.isEmpty {
                         Text("·").foregroundStyle(Palette.fgMute)
-                        AgentTag(owner, dimmed: !on)
+                        AgentTag(wakesShort, dimmed: !on)
                     }
                 }
                 .font(.sf(13))
@@ -156,6 +158,13 @@ struct AlarmRow: View {
         Button("Delete Alarm", role: .destructive) { store.cancel(id: alarm.id) }
     }
 
+    /// Compact "who it wakes" — one or two names, then "+k".
+    private var wakesShort: String {
+        let t = alarm.targets
+        if t.count <= 2 { return t.joined(separator: ", ") }
+        return "\(t[0]) +\(t.count - 1)"
+    }
+
     /// Apple's `ALARM_DETAIL_FORMAT = "%1$@, %2$@"` → "{label}, {repeat}", with the
     /// label defaulting to "Alarm" and the repeat dropped when it's Never.
     private var detail: String {
@@ -187,6 +196,7 @@ struct AlarmSheet: View {
     @State private var note = ""
     @State private var repeatDays: Set<Int> = []
     @State private var wake = true
+    @State private var targets: Set<String> = []   // agents to wake; empty = everyone
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
@@ -208,6 +218,8 @@ struct AlarmSheet: View {
                 }
                 Hairline()
                 row("Wake the agent") { AppleSwitch(isOn: $wake) }
+                Hairline()
+                row("Wake which") { agentPicker }
             }
 
             // The note is the alarm's whole payload when it wakes an agent, so it
@@ -255,6 +267,7 @@ struct AlarmSheet: View {
             hour = a.hour; minute = a.minute
             label = a.label; note = a.note
             repeatDays = a.repeatDays; wake = a.wakeAgent
+            targets = Set(a.targets)
         }
     }
 
@@ -280,15 +293,52 @@ struct AlarmSheet: View {
             .onTapGesture { if on { repeatDays.remove(d) } else { repeatDays.insert(d) } }
     }
 
+    /// A menu multi-select over the connected agents. "Everyone" (no selection) is the
+    /// broadcast default; picking names narrows the wake to exactly those agents.
+    private var agentPicker: some View {
+        Menu {
+            Button { targets = [] } label: {
+                if targets.isEmpty { Label("Everyone", systemImage: "checkmark") } else { Text("Everyone") }
+            }
+            if !agentNames.isEmpty { Divider() }
+            ForEach(agentNames, id: \.self) { name in
+                Button { toggle(name) } label: {
+                    if targets.contains(name) { Label(name, systemImage: "checkmark") } else { Text(name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(wakesLabel).font(.sf(13)).foregroundStyle(Palette.accent).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.sf(9)).foregroundStyle(Palette.fgDim)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Which agent(s) this alarm wakes — everyone, or a chosen few")
+    }
+
+    /// The roster ∪ any already-chosen names, so a target set from the CLI (or an agent
+    /// that has since disconnected) still shows and can be toggled off.
+    private var agentNames: [String] {
+        Array(Set(store.agents.map(\.name)).union(targets)).sorted()
+    }
+    private var wakesLabel: String {
+        targets.isEmpty ? "Everyone" : targets.sorted().joined(separator: ", ")
+    }
+    private func toggle(_ name: String) {
+        if targets.contains(name) { targets.remove(name) } else { targets.insert(name) }
+    }
+
     private func save() {
         let l = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let n = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if let a = editing {
             store.updateAlarm(id: a.id, hour: hour, minute: minute, label: l, note: n,
-                              repeatDays: repeatDays, wakeAgent: wake)
+                              repeatDays: repeatDays, wakeAgent: wake, targets: Array(targets))
         } else {
             store.addAlarm(hour: hour, minute: minute, label: l, note: n,
-                           repeatDays: repeatDays, wakeAgent: wake, by: .user)
+                           repeatDays: repeatDays, wakeAgent: wake, targets: Array(targets), by: .user)
         }
         dismiss()
     }

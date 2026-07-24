@@ -13,19 +13,22 @@ let first = argv.first ?? "help"
 let helpText = """
 clock — a shared alarm clock for you and your agent.
 You (the agent) schedule your own alarms and timers; the human sets them in the GUI.
-An alarm/timer targets exactly the agent who set it: when it fires you get a signal
-(`alarm.fired` / `timer.done`, type run) that wakes you for that turn.
+By default an alarm/timer wakes the agent who set it — but who an alarm wakes is
+selectable (in the GUI, or with `--to`): when it fires the chosen agent(s) get a signal
+(`alarm.fired` / `timer.done`, type run) that wakes them for that turn.
 
 usage:
   clock now                          print the current time
-  clock list                         list all alarms and timers
+  clock list                         list all alarms and timers (→ shows who each wakes)
   clock alarm <time> "<label>"       set an alarm at a wall-clock time
       --note "<text>"                what to do when it fires — this becomes YOUR
                                      PROMPT for the turn the alarm wakes
+      --to <agents>                  who to wake: everyone | alice | alice,bob
+                                     (default: just you; the human picks in the GUI)
       --repeat <days>                daily | weekdays | weekends | mon,wed,fri
       --quiet                        fire as context (do NOT wake you → alarm.quiet)
   clock edit <id> [<time>]           change an alarm; omitted flags keep their value
-      --time · --label · --note · --repeat · --quiet · --wake
+      --time · --label · --note · --repeat · --quiet · --wake · --to
   clock timer <dur> "<label>"        start a countdown (fires timer.done when it ends)
   clock cancel <id>                  remove an alarm (aN) or timer (tN)
   clock toggle <id>                  enable / disable an alarm
@@ -47,11 +50,21 @@ full instruction, not a reminder to yourself to remember something.
   clock alarm 9:00 "standup" --note "post yesterday's diff summary to #eng"
 """
 
+/// Parse a `--to` value into a wake-target list. `nil` (flag absent) lets the store
+/// pick the default; `"everyone"`/`"all"` → `[]` (broadcast); else the comma/space-
+/// separated agent names.
+func parseTargets(_ s: String?) -> [String]? {
+    guard let raw = s?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+    let low = raw.lowercased()
+    if low == "everyone" || low == "all" || low == "any" { return [] }
+    return raw.split(whereSeparator: { $0 == "," || $0 == " " }).map(String.init)
+}
+
 func fmtAlarm(_ a: AlarmDTO) -> String {
     var tags = [a.repeatText]
     if !a.enabled { tags.append("off") }
     if !a.wakeAgent { tags.append("quiet") }
-    if let f = a.forAgent { tags.append("→\(f)") }
+    tags.append("→ \(a.wakesText)")   // who it wakes: everyone | alice | alice, bob
     let label = a.label.isEmpty ? "" : "  \(a.label)"
     var line = "\(a.id.padding(toLength: 4, withPad: " ", startingAt: 0)) "
         + "\(a.timeText.padding(toLength: 8, withPad: " ", startingAt: 0))\(label)  [\(tags.joined(separator: ", "))]"
@@ -107,6 +120,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let why = reason == "inbox_full" ? "its inbox is full"
                         : reason == "queue_full" ? "its context queue is full" : reason
                 pipe?.notify("\(AppInfo.cli): couldn't deliver '\(id)' to \(agent) — \(why); nothing was delivered")
+            }
+            // Clatch pushes the bound-agent roster here (a snapshot after register, then
+            // on every change). Feed it to the store so the GUI's wake-target picker and
+            // the CLI can offer the real agents.
+            pipe.onAgents = { [weak self] agents in
+                let rows = agents.map { ClockStore.AgentRow(name: $0.name, backend: $0.backend, model: $0.model) }
+                DispatchQueue.main.async { self?.store.setAgents(rows) }
             }
             if pipe.start() {
                 control = pipe
@@ -200,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let a = store.addAlarm(hour: h, minute: m, label: req.label ?? "", note: req.note ?? "",
                                    repeatDays: Days.parse(req.days), wakeAgent: !(req.quiet ?? false),
-                                   by: .agent, agent: req.agent)
+                                   targets: parseTargets(req.to), by: .agent, agent: req.agent)
             var r = snap(); r.alarm = store.alarmDTO(a); return r
         case "timer":
             guard let raw = req.when, let secs = TimeParse.duration(raw), secs > 0 else {
@@ -214,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return handle(Request(cmd: "timer", when: req.when, label: req.label, agent: req.agent))
             }
             return handle(Request(cmd: "alarm", when: req.when, label: req.label, note: req.note,
-                                  days: req.days, quiet: req.quiet, agent: req.agent))
+                                  days: req.days, quiet: req.quiet, to: req.to, agent: req.agent))
         case "edit":
             // Partial update: every field you omit keeps its current value.
             guard let id = req.id, let cur = store.alarm(id: id) else {
@@ -232,7 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 label: req.label ?? cur.label,
                 note: req.note ?? cur.note,
                 repeatDays: req.days.map { Days.parse($0) } ?? cur.repeatDays,
-                wakeAgent: req.quiet.map { !$0 } ?? cur.wakeAgent)
+                wakeAgent: req.quiet.map { !$0 } ?? cur.wakeAgent,
+                targets: req.to.map { parseTargets($0) ?? [] } ?? cur.targets)
             else { return Response(ok: false, error: "no such alarm: \(id)") }
             var r = snap(); r.alarm = store.alarmDTO(a); return r
         case "cancel":
@@ -294,6 +315,8 @@ func runClient(_ argv: [String]) -> Never {
                 i += 1; guard i < rest.count else { fail("--label needs a value") }; req.label = rest[i]
             case "--note":
                 i += 1; guard i < rest.count else { fail("--note needs a value") }; req.note = rest[i]
+            case "--to", "--agents":
+                i += 1; guard i < rest.count else { fail("--to needs a value (everyone | alice | alice,bob)") }; req.to = rest[i]
             case "--time":
                 i += 1; guard i < rest.count else { fail("--time needs a value") }; req.when = rest[i]
             default: positionals.append(rest[i])
@@ -349,9 +372,32 @@ func runClient(_ argv: [String]) -> Never {
     exit(0)
 }
 
+// MARK: - Dev: render a GUI screen to a PNG offscreen (no display needed)
+
+@MainActor
+func renderPreview(to path: String, kind: String) {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.accessory)
+    let store = ClockStore(); store.applyPreview()
+    let content: AnyView = kind == "sheet"
+        ? AnyView(AlarmSheet(store: store, editing: store.alarms.first).frame(width: 420, height: 660))
+        : AnyView(AlarmsView(store: store).frame(width: 600, height: 660))
+    let renderer = ImageRenderer(content: content.background(Palette.bg))
+    renderer.scale = 2
+    guard let img = renderer.nsImage, let tiff = img.tiffRepresentation,
+          let rep = NSBitmapImageRep(data: tiff),
+          let png = rep.representation(using: .png, properties: [:]) else { fail("render failed") }
+    try? png.write(to: URL(fileURLWithPath: path))
+    print("rendered \(path)")
+}
+
 // MARK: - Dispatch
 
 switch first {
+case "render":
+    guard argv.count >= 2 else { fail("usage: \(AppInfo.cli) render <path> [list|sheet]") }
+    MainActor.assumeIsolated { renderPreview(to: argv[1], kind: argv.count > 2 ? argv[2] : "list") }
+    exit(0)
 case "app":
     if clatchInit(appId: AppInfo.id) { exit(0) }
     if let i = argv.firstIndex(of: "--control-addr") {

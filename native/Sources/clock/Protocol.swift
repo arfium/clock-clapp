@@ -13,6 +13,7 @@ struct Request: Codable {
     var id: String?          // cancel / toggle / pause / resume / edit
     var days: String?        // alarm --repeat: "weekdays", "weekends", "daily", "mon,wed,fri"
     var quiet: Bool?         // alarm --quiet: fire as context, don't wake (--wake sets false)
+    var to: String?          // alarm --to: who to wake — "everyone" | "alice" | "alice,bob"
     var agent: String?       // the caller's CLATCH_AGENT (forwarded by the CLI)
 }
 
@@ -27,7 +28,9 @@ struct AlarmDTO: Codable {
     var repeatText: String     // "Once" | "Every day" | "Weekdays" | "Mon Wed Fri"
     var enabled: Bool
     var wakeAgent: Bool
-    var forAgent: String?       // the agent a firing alarm targets (nil = broadcast)
+    var forAgent: String?       // the owner (the agent that set it via CLI; nil = human/GUI)
+    var targets: [String]       // the agents it wakes ([] = everyone)
+    var wakesText: String       // "everyone" | "alice" | "alice, bob"
     var nextText: String        // "in 3h 12m" | "off"
 }
 

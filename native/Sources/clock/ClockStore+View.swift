@@ -60,10 +60,11 @@ extension ClockStore {
         let nextText: String
         if a.enabled, let d = nextFire(a, from: now) { nextText = TimeParse.relative(d, from: now) }
         else { nextText = "off" }
+        let wakes = a.targets.isEmpty ? "everyone" : a.targets.joined(separator: ", ")
         return AlarmDTO(id: a.id, hour: a.hour, minute: a.minute, timeText: Fmt.hm(a.hour, a.minute),
                         label: a.label, note: a.note, repeatText: Days.summary(a.repeatDays),
                         enabled: a.enabled, wakeAgent: a.wakeAgent, forAgent: a.agentName,
-                        nextText: nextText)
+                        targets: a.targets, wakesText: wakes, nextText: nextText)
     }
 
     func timerDTO(_ t: Countdown) -> TimerDTO {
