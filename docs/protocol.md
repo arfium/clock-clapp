@@ -21,7 +21,7 @@ the agent-facing surface.
   "name": "Clapp",
   "description": "…",                       // library entry + context-inserted on grant
   "version": "0.1.0",
-  "protocol": 1,                            // control-pipe major this app targets (§6)
+  "protocol": 2,                            // control-pipe major this app targets (§6, §12)
   "icon": "assets/icon.png",                // optional; banner/about/tags also optional
   "launch": { "macos": "bin/clapp", "args": ["app"] },   // ≥1 per-OS command
   "connector": {                            // agent-facing surface; every field optional
@@ -160,8 +160,8 @@ The whole surface. Adding a method is a deliberate act.
 | `app.notify` | app→clatch | notification | `{text}` |
 | `app.ping` | clatch→app | request | — → `{ok:true}` |
 | `app.shutdown` | clatch→app | request | — → reply, then exit |
-| `app.agents` | clatch→app | notification | `{agents:[{name, backend, model?, avatar?}]}` |
-| `app.toAgentRefused` | clatch→app | notification | `{id, agent, reason}` |
+| `app.agents` | clatch→app | notification | `{agents:[{id, name, backend, model?, avatar?}]}` |
+| `app.toAgentRefused` | clatch→app | notification | `{id, agent, reason}` (`agent` = an agent id) |
 
 The app→clatch surface is **notifications only** apart from `app.register`; any other
 request from the app gets an error and Clatch keeps draining, so a misbehaving app
@@ -188,15 +188,17 @@ its intent checkably.
 | `context` | queued, injected at the next turn boundary — in order, lossless |
 | `buffered` | replaces the agent's one chat-buffer slot; rides the user's next prompt |
 
-`target` is a list of agent **names**. Empty/omitted = fan-out to every
-bound-and-uncut agent; non-empty = only those, **still intersected with the cut
-matrix** (an app can never reach an agent that did not grant it). Names come from
-`CLATCH_AGENT` (the caller of the app's CLI) or the `app.agents` roster (§9).
+`target` is a list of agent **ids** — the immutable identity, never the mutable
+display `name` (§9). Empty/omitted = fan-out to every bound-and-uncut agent; non-empty
+= only those, **still intersected with the cut matrix** (an app can never reach an
+agent that did not grant it). Ids come from `CLATCH_AGENT_ID` (the id of the agent that
+invoked the app's CLI) or the `app.agents` roster (§9).
 
 **All-or-nothing fan-out.** A `run`/`context` signal reaches **every** resolved agent
 or **none**: if any receiver cannot accept it (full inbox for `run`, full context
 queue for `context`), the whole emission is refused and Clatch sends
-**`app.toAgentRefused {id, agent, reason}`** (`reason`: `inbox_full` | `queue_full`).
+**`app.toAgentRefused {id, agent, reason}`**, where `agent` is the **agent id** of the
+first receiver (in id order) that could not accept and `reason` is `inbox_full` | `queue_full`.
 `buffered` is exempt (one replace-in-place slot, so it never refuses). Partial
 fan-out is forbidden: two agents driven by one app diverge the instant one silently
 misses a signal the other got.
@@ -211,11 +213,21 @@ after register and again on every change (a bind/unbind, rename, model switch, n
 avatar). The app just **replaces its view** (the ordered stream delivers snapshots in
 order; there is no seq).
 
-Each entry is `{name, backend, model?, avatar?}`, `avatar = {mime, path, width,
+Each entry is `{id, name, backend, model?, avatar?}`, `avatar = {mime, path, width,
 height}` (an absolute, same-machine path). The roster is **only this app's own bound
 agents** — never other apps' agents, and never an agent's permissions, cuts, or the
 other apps it is bound to (the local trust boundary). It exists so the app can pick a
-`target` (§8) by name.
+`target` (§8) and map an id → its display name.
+
+- **`id` is the key; `name` is for humans.** The `id` is immutable for the agent's
+  whole lifetime; the `name` is unique but re-pointable — **same id + new name = the
+  same agent, re-labeled**. Key every per-agent thing (state, targets, rows) on the
+  `id` and only *show* the `name`. **Targeting or keying by name is a bug**: the app's
+  job is to surface the name and speak id on the wire. A rename arrives as a fresh
+  snapshot with the same id — update the label in place, never drop and re-create.
+- **`CLATCH_AGENT_ID` names the caller.** When the app is a tool an agent ran, that
+  agent's CLI shell carries `CLATCH_AGENT_ID` (its immutable id), so "reply to whoever
+  called me" needs no roster lookup — target that id. It stays valid across a rename.
 
 ## 10. Lifecycle
 
@@ -248,3 +260,8 @@ here — a running instance is already compatible.
   install. Within a major, only additive change (new optional fields, new optional
   notifications); a breaking change is a new major, served alongside the old for a
   documented window so installed apps do not break on a launcher update.
+- **Current major: 2** (2026-07-25) — agent identity became the **id/name split**:
+  `app.toAgent.target` and `app.toAgentRefused.agent` carry agent **ids**, `app.agents`
+  entries carry `{id, name, …}`, and the caller env is **`CLATCH_AGENT_ID`**. Major 1
+  predates every shipped clapp and is **not** served alongside (the compatibility
+  window starts at 2), so no backward-compatibility path exists or is needed.

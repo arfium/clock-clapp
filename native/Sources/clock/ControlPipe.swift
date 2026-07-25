@@ -41,21 +41,23 @@ final class ControlPipe {
         let height: Int
     }
     struct ConnectedAgent {
-        let name: String       // the target key (app.toAgent `target: [name]`)
+        let id: String         // IMMUTABLE identity — the only wire key (app.toAgent `target: [id]`)
+        let name: String       // unique display handle; MAY change between pushes. Show it,
+                               // never key on it: same id + new name = the same agent, re-labeled.
         let backend: String    // the brand/harness, e.g. "cline-acp"
         let model: String?     // current model, or nil
         let avatar: Avatar?    // profile image, or nil
     }
-    /// The pushed roster (above), for *targeting a named, non-calling agent*. The
-    /// demo leaves this unset — it targets the caller via `CLATCH_AGENT`, or
-    /// broadcasts. Fires on the read thread; hop to your actor before touching UI.
+    /// The pushed roster (above), for *targeting a chosen, non-calling agent* (and for
+    /// mapping id → display name). The demo leaves this unset — it targets the caller via
+    /// `CLATCH_AGENT_ID`, or broadcasts. Fires on the read thread; hop to your actor first.
     var onAgents: (([ConnectedAgent]) -> Void)?
 
     /// An `app.toAgent` was REFUSED whole (all-or-nothing): a receiver could not
     /// accept, so NOTHING was delivered. `id` is the refused signal's declared id;
-    /// `agent` is the first receiver (name order) that could not accept; `reason` is
-    /// "inbox_full" (a `run` target) or "queue_full" (a `context` target); `buffered`
-    /// never refuses. Fires on the read thread. No handler = the app just doesn't react.
+    /// `agent` is the AGENT ID of the first receiver (in id order) that could not accept;
+    /// `reason` is "inbox_full" (a `run` target) or "queue_full" (a `context` target);
+    /// `buffered` never refuses. Fires on the read thread. No handler = no reaction.
     var onSignalRefused: ((_ id: String, _ agent: String, _ reason: String) -> Void)?
 
     private var fd: Int32 = -1
@@ -115,11 +117,12 @@ final class ControlPipe {
     /// and `type` is looked up from that declaration and stamped on, so intent is
     /// explicit and Clatch re-validates it (a mismatch or an undeclared id is dropped).
     ///
-    /// `target` is a list of agent names. Empty (the default) = broadcast to every
-    /// bound-and-uncut agent; non-empty = only those, still intersected with the cut
-    /// matrix (you can never reach an agent that did not grant you). You know who to
-    /// target because Clatch injects `CLATCH_AGENT` into every agent's CLI shell, so
-    /// you can wake the caller, a named other agent, a set, or everyone.
+    /// `target` is a list of agent IDS — the immutable identity, never the mutable
+    /// display `name`. Empty (the default) = broadcast to every bound-and-uncut agent;
+    /// non-empty = only those, still intersected with the cut matrix (you can never reach
+    /// an agent that did not grant you). Ids come from `CLATCH_AGENT_ID` (the agent that
+    /// ran your CLI — wake the caller) or the `app.agents` roster (a chosen other agent,
+    /// a set, or everyone).
     func emitSignal(_ id: String, target: [String] = [], _ payload: [String: String] = [:]) {
         guard fd >= 0 else { return }
         guard let type = signals[id] else {
@@ -271,7 +274,8 @@ final class ControlPipe {
         guard let params = msg["params"] as? [String: Any] else { return }
         let rows = (params["agents"] as? [[String: Any]]) ?? []
         let agents = rows.compactMap { row -> ConnectedAgent? in
-            guard let name = row["name"] as? String,
+            guard let id = row["id"] as? String,          // the wire key; an entry without it is malformed
+                  let name = row["name"] as? String,
                   let backend = row["backend"] as? String else { return nil }
             var avatar: Avatar?
             if let a = row["avatar"] as? [String: Any],
@@ -280,7 +284,7 @@ final class ControlPipe {
                                 width: numericId(a["width"]) ?? 0,
                                 height: numericId(a["height"]) ?? 0)
             }
-            return ConnectedAgent(name: name, backend: backend,
+            return ConnectedAgent(id: id, name: name, backend: backend,
                                   model: row["model"] as? String, avatar: avatar)
         }
         onAgents?(agents)

@@ -120,7 +120,7 @@ struct TimerRing: View {
                             }
                             .font(.sf(13)).foregroundStyle(Palette.fgDim)
                         }
-                        if let owner = t.agentName { AgentTag(owner) }
+                        if let owner = store.nameForId(t.ownerId) { AgentTag(owner) }
                     }
                 }
                 .frame(width: RING, height: RING)

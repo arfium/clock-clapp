@@ -31,20 +31,23 @@ final class ClockStore: ObservableObject {
         var repeatDays: Set<Int>      // Calendar weekday 1=Sun … 7=Sat; empty = one-shot
         var enabled: Bool
         var wakeAgent: Bool           // fire wakes the agent (run) vs notify only (context)
-        var agentName: String?        // the CLATCH_AGENT that set it via CLI (nil = human/GUI) — the owner
-        /// The agents this alarm fires at, by name (the `app.toAgent` target key).
-        /// **Empty = broadcast** to every bound agent. Chosen in the GUI / via `--to`.
+        var ownerId: String?          // the CLATCH_AGENT_ID that set it via CLI (nil = human/GUI) — the owner
+        /// The agents this alarm fires at, by IMMUTABLE agent id (the `app.toAgent` target
+        /// key). **Empty = broadcast** to every bound agent. Chosen in the GUI / via `--to`
+        /// (a name typed there is resolved to an id). We store ids, not names: names can be
+        /// re-pointed, ids can't — same id + new name = the same agent.
         var targets: [String] = []
         var lastFired: String?        // "yyyyMMddHHmm" guard so it fires once per matching minute
     }
 
     /// One bound agent from the roster Clatch pushes on `app.agents` — what the GUI
-    /// offers as a wake target. Replaced wholesale on every push.
+    /// offers as a wake target. Replaced wholesale on every push. `id` is the wire key;
+    /// `name` is a re-pointable display handle.
     struct AgentRow: Identifiable, Equatable {
-        var name: String              // the target key
+        var id: String
+        var name: String
         var backend: String
         var model: String?
-        var id: String { name }
     }
 
     struct Countdown: Codable, Identifiable {
@@ -54,7 +57,7 @@ final class ClockStore: ObservableObject {
         var endAt: Date               // wall-clock fire time (valid while running)
         var pausedRemaining: Int?     // set when paused (frozen); nil while running
         var done: Bool
-        var agentName: String?
+        var ownerId: String?          // the CLATCH_AGENT_ID that set it (nil = human/GUI)
         var isRunning: Bool { pausedRemaining == nil && !done }
         func remaining(_ now: Date) -> Int {
             if done { return 0 }
@@ -73,21 +76,32 @@ final class ClockStore: ObservableObject {
     /// Replace the roster (called on the main actor from the `app.agents` push).
     func setAgents(_ rows: [AgentRow]) { agents = rows }
 
+    /// Resolve an agent id → its current display name (falls back to the id if the agent
+    /// left the roster). Name is display-only; id is the wire key.
+    func nameForId(_ id: String?) -> String? {
+        guard let id else { return nil }
+        return agents.first { $0.id == id }?.name ?? id
+    }
+    /// Resolve display names (what a human types in `--to`) → agent ids (drops unknowns).
+    func idsForNames(_ names: [String]) -> [String] {
+        names.compactMap { n in agents.first { $0.name.caseInsensitiveCompare(n) == .orderedSame }?.id }
+    }
+
     /// In-memory mock state for the offscreen GUI preview (`clock render`). Dev-only —
     /// it does NOT persist (no `save()`), so it never touches the real ~/.clock store.
     func applyPreview() {
-        agents = [AgentRow(name: "alice", backend: "claude-acp", model: "opus"),
-                  AgentRow(name: "bob", backend: "codex-acp", model: nil),
-                  AgentRow(name: "carol", backend: "gemini-acp", model: nil)]
+        agents = [AgentRow(id: "1001", name: "alice", backend: "claude-acp", model: "opus"),
+                  AgentRow(id: "1002", name: "bob", backend: "codex-acp", model: nil),
+                  AgentRow(id: "1003", name: "carol", backend: "gemini-acp", model: nil)]
         alarms = [
             Alarm(id: "a1", hour: 7, minute: 30, label: "standup", note: "post yesterday's diff to #eng",
-                  repeatDays: [2, 3, 4, 5, 6], enabled: true, wakeAgent: true, agentName: nil,
-                  targets: ["alice", "bob"], lastFired: nil),
+                  repeatDays: [2, 3, 4, 5, 6], enabled: true, wakeAgent: true, ownerId: nil,
+                  targets: ["1001", "1002"], lastFired: nil),
             Alarm(id: "a2", hour: 8, minute: 0, label: "all hands", note: "",
-                  repeatDays: [], enabled: true, wakeAgent: true, agentName: nil, targets: [], lastFired: nil),
+                  repeatDays: [], enabled: true, wakeAgent: true, ownerId: nil, targets: [], lastFired: nil),
             Alarm(id: "a3", hour: 22, minute: 0, label: "nightly", note: "run the backup",
-                  repeatDays: [1, 2, 3, 4, 5, 6, 7], enabled: false, wakeAgent: true, agentName: nil,
-                  targets: ["bob"], lastFired: nil),
+                  repeatDays: [1, 2, 3, 4, 5, 6, 7], enabled: false, wakeAgent: true, ownerId: nil,
+                  targets: ["1002"], lastFired: nil),
         ]
     }
 
@@ -151,12 +165,13 @@ final class ClockStore: ObservableObject {
         let target = a.targets
         var payload = ["id": a.id, "label": a.label, "at": ISO8601DateFormatter().string(from: when),
                        "time": String(format: "%02d:%02d", a.hour, a.minute),
-                       "to": a.targets.isEmpty ? "everyone" : a.targets.joined(separator: ",")]
+                       // display: resolve target ids → current names for the agent to read
+                       "to": a.targets.isEmpty ? "everyone" : a.targets.map { nameForId($0) ?? $0 }.joined(separator: ",")]
         // The note rides along as the agent's instruction. On `alarm.fired` (run) it
         // is effectively the prompt for the turn this signal starts; on `alarm.quiet`
         // (context) it is just what got recorded. The signal NAME decides which.
         if !a.note.isEmpty { payload["note"] = a.note }
-        if let owner = a.agentName { payload["for"] = owner }
+        if let owner = a.ownerId { payload["for"] = nameForId(owner) ?? owner }
         onSignal?(name, target, payload)
         onFire?()
     }
@@ -164,10 +179,10 @@ final class ClockStore: ObservableObject {
     private func fireTimer(_ i: Int) {
         timers[i].done = true
         let t = timers[i]
-        let target = t.agentName.map { [$0] } ?? []
+        let target = t.ownerId.map { [$0] } ?? []   // an id — the setter
         var payload = ["id": t.id, "label": t.label, "seconds": String(t.total),
                        "at": ISO8601DateFormatter().string(from: now)]
-        if let owner = t.agentName { payload["for"] = owner }
+        if let owner = t.ownerId { payload["for"] = nameForId(owner) ?? owner }
         onSignal?("timer.done", target, payload)
         onFire?()
     }
@@ -177,13 +192,13 @@ final class ClockStore: ObservableObject {
     @discardableResult
     func addAlarm(hour: Int, minute: Int, label: String, note: String = "", repeatDays: Set<Int>,
                   wakeAgent: Bool, targets: [String]? = nil, by actor: Actor, agent: String? = nil) -> Alarm {
-        let owner = actor == .agent ? agent : nil
+        let owner = actor == .agent ? agent : nil   // CLATCH_AGENT_ID (an id)
         // Explicit selection wins; otherwise a CLI alarm wakes its setter, a GUI alarm
-        // broadcasts (empty). Keep only targets that are (or were) real agent names.
+        // broadcasts (empty). Targets and owner are agent IDS.
         let resolved = targets ?? (owner.map { [$0] } ?? [])
         let a = Alarm(id: "a\(nextA)", hour: hour, minute: minute, label: label, note: note,
                       repeatDays: repeatDays, enabled: true, wakeAgent: wakeAgent,
-                      agentName: owner, targets: resolved, lastFired: nil)
+                      ownerId: owner, targets: resolved, lastFired: nil)
         nextA += 1
         alarms.append(a)
         sortAlarms()
@@ -198,7 +213,7 @@ final class ClockStore: ObservableObject {
 
     /// Edit an existing alarm in place. Clearing `lastFired` re-arms it, so moving an
     /// alarm onto the current minute still rings instead of being swallowed by the
-    /// once-per-minute guard. Ownership (`agentName`) is deliberately NOT editable —
+    /// once-per-minute guard. Ownership (`ownerId`) is deliberately NOT editable —
     /// whoever set it stays the one it wakes.
     @discardableResult
     func updateAlarm(id: String, hour: Int, minute: Int, label: String, note: String,
@@ -233,7 +248,7 @@ final class ClockStore: ObservableObject {
     func addTimer(seconds: Int, label: String, by actor: Actor, agent: String? = nil) -> Countdown {
         let t = Countdown(id: "t\(nextT)", label: label, total: seconds,
                           endAt: Date().addingTimeInterval(TimeInterval(seconds)),
-                          pausedRemaining: nil, done: false, agentName: actor == .agent ? agent : nil)
+                          pausedRemaining: nil, done: false, ownerId: actor == .agent ? agent : nil)
         nextT += 1
         timers.append(t)
         save()
@@ -319,10 +334,9 @@ extension ClockStore.Alarm {
         repeatDays = try c.decode(Set<Int>.self, forKey: .repeatDays)
         enabled = try c.decode(Bool.self, forKey: .enabled)
         wakeAgent = try c.decode(Bool.self, forKey: .wakeAgent)
-        agentName = try c.decodeIfPresent(String.self, forKey: .agentName)
-        // Added after `targets` shipped: a stored alarm without it keeps its old
-        // behavior — wake its owner, or broadcast if it was human-set.
-        targets = try c.decodeIfPresent([String].self, forKey: .targets) ?? (agentName.map { [$0] } ?? [])
+        ownerId = try c.decodeIfPresent(String.self, forKey: .ownerId)
+        // A stored alarm without `targets` falls back to its owner (or broadcast).
+        targets = try c.decodeIfPresent([String].self, forKey: .targets) ?? (ownerId.map { [$0] } ?? [])
         lastFired = try c.decodeIfPresent(String.self, forKey: .lastFired)
     }
 }

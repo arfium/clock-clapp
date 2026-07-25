@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // on every change). Feed it to the store so the GUI's wake-target picker and
             // the CLI can offer the real agents.
             pipe.onAgents = { [weak self] agents in
-                let rows = agents.map { ClockStore.AgentRow(name: $0.name, backend: $0.backend, model: $0.model) }
+                let rows = agents.map { ClockStore.AgentRow(id: $0.id, name: $0.name, backend: $0.backend, model: $0.model) }
                 DispatchQueue.main.async { self?.store.setAgents(rows) }
             }
             if pipe.start() {
@@ -220,7 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let a = store.addAlarm(hour: h, minute: m, label: req.label ?? "", note: req.note ?? "",
                                    repeatDays: Days.parse(req.days), wakeAgent: !(req.quiet ?? false),
-                                   targets: parseTargets(req.to), by: .agent, agent: req.agent)
+                                   // --to names → agent ids (nil = owner default, [] = everyone)
+                                   targets: parseTargets(req.to).map { store.idsForNames($0) },
+                                   by: .agent, agent: req.agent)
             var r = snap(); r.alarm = store.alarmDTO(a); return r
         case "timer":
             guard let raw = req.when, let secs = TimeParse.duration(raw), secs > 0 else {
@@ -253,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 note: req.note ?? cur.note,
                 repeatDays: req.days.map { Days.parse($0) } ?? cur.repeatDays,
                 wakeAgent: req.quiet.map { !$0 } ?? cur.wakeAgent,
-                targets: req.to.map { parseTargets($0) ?? [] } ?? cur.targets)
+                targets: req.to.map { store.idsForNames(parseTargets($0) ?? []) } ?? cur.targets)
             else { return Response(ok: false, error: "no such alarm: \(id)") }
             var r = snap(); r.alarm = store.alarmDTO(a); return r
         case "cancel":
@@ -346,8 +348,8 @@ func runClient(_ argv: [String]) -> Never {
     default: fail("unknown command: \(cmd) (try: \(AppInfo.cli) help)")
     }
 
-    // Forward CLATCH_AGENT so the app targets us when our alarm/timer fires.
-    req.agent = ProcessInfo.processInfo.environment["CLATCH_AGENT"].flatMap { $0.isEmpty ? nil : $0 }
+    // Forward CLATCH_AGENT_ID so the app targets us when our alarm/timer fires.
+    req.agent = ProcessInfo.processInfo.environment["CLATCH_AGENT_ID"].flatMap { $0.isEmpty ? nil : $0 }
 
     let resp: Response
     do { resp = try sendRequest(req) } catch { fail("\(error)") }

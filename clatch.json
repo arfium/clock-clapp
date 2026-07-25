@@ -6,7 +6,7 @@
   "about": "Clatch has no cron; a scheduler is just an app that fires signals. Clock is that app, built like a real clock: a live analog face, drum-wheel alarms, and a countdown timer. The agent schedules its own alarms and timers over the CLI, the human sets them in the GUI, and when one is due it fires a run-type signal that wakes the agent(s) the alarm targets — chosen in the GUI (or with --to), defaulting to whoever set it.",
   "tags": ["utility", "productivity", "scheduler"],
   "version": "0.1.0",
-  "protocol": 1,
+  "protocol": 2,
   "icon": "assets/icon.png",
   "launch": {
     "macos": "bin/clock",

@@ -60,10 +60,11 @@ extension ClockStore {
         let nextText: String
         if a.enabled, let d = nextFire(a, from: now) { nextText = TimeParse.relative(d, from: now) }
         else { nextText = "off" }
-        let wakes = a.targets.isEmpty ? "everyone" : a.targets.joined(separator: ", ")
+        // Display: resolve target ids → current names (the wire stores ids).
+        let wakes = a.targets.isEmpty ? "everyone" : a.targets.map { nameForId($0) ?? $0 }.joined(separator: ", ")
         return AlarmDTO(id: a.id, hour: a.hour, minute: a.minute, timeText: Fmt.hm(a.hour, a.minute),
                         label: a.label, note: a.note, repeatText: Days.summary(a.repeatDays),
-                        enabled: a.enabled, wakeAgent: a.wakeAgent, forAgent: a.agentName,
+                        enabled: a.enabled, wakeAgent: a.wakeAgent, forAgent: nameForId(a.ownerId),
                         targets: a.targets, wakesText: wakes, nextText: nextText)
     }
 
@@ -75,7 +76,7 @@ extension ClockStore {
         return TimerDTO(id: t.id, label: t.label, remaining: r,
                         remainingText: Fmt.duration(r),
                         endText: t.done ? "done" : (t.isRunning ? Fmt.endText(t.endAt) : "paused"),
-                        running: t.isRunning, done: t.done, forAgent: t.agentName)
+                        running: t.isRunning, done: t.done, forAgent: nameForId(t.ownerId))
     }
 
     func snapshotAlarms() -> [AlarmDTO] { alarms.map(alarmDTO) }

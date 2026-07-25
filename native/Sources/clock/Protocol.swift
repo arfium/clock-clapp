@@ -14,7 +14,7 @@ struct Request: Codable {
     var days: String?        // alarm --repeat: "weekdays", "weekends", "daily", "mon,wed,fri"
     var quiet: Bool?         // alarm --quiet: fire as context, don't wake (--wake sets false)
     var to: String?          // alarm --to: who to wake — "everyone" | "alice" | "alice,bob"
-    var agent: String?       // the caller's CLATCH_AGENT (forwarded by the CLI)
+    var agent: String?       // the caller's CLATCH_AGENT_ID (the agent id, forwarded by the CLI)
 }
 
 /// An alarm, projected for CLI + GUI.

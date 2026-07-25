@@ -121,17 +121,23 @@ opens run on purpose. If a wake alarm never starts a turn, open run on that agen
 bind — or check it isn't cut. (A `--quiet` alarm is a *different signal*,
 `alarm.quiet`, declared `context` by design: notify, don't wake.)
 
-## Each alarm wakes exactly the agent who set it
+## Which agent(s) an alarm wakes
 
-When an agent runs `clock alarm …` or `clock timer …`, Clatch has injected
-`CLATCH_AGENT=<name>` into its CLI shell; clock records that name. When it fires, it
-**targets that one agent** (Clatch #77) — the other granted agents get nothing. So
-two agents can each keep their own timers in the same clock without waking each
-other. An alarm you set in the **GUI** has no owner, so it broadcasts to every
-granted agent. `clock list` shows the target as a `→<agent>` tag.
+By default an alarm or timer wakes **exactly the agent who set it**: when an agent runs
+`clock alarm …`, Clatch has injected `CLATCH_AGENT_ID=<id>` (the agent's immutable id)
+into its CLI shell, and clock records that id. When it fires it **targets that agent by
+id** — the other granted agents get nothing, so two agents keep their own alarms in one
+clock without waking each other.
+
+You can also **choose** who an alarm wakes — in the GUI's *Wake which* picker, or with
+`--to alice,bob` / `--to everyone` on the CLI. A name you type is resolved to the agent's
+**id** (the wire key) and stored as an id; `clock list` resolves it back to `→ <name>`
+for display. An alarm set in the GUI with no choice broadcasts to every granted agent.
+Because targets are stored by id, a **renamed agent keeps its alarms** — same id, new
+label.
 
 This is the launcher spec's own example of targeting made real: *"a scheduler records
-the `CLATCH_AGENT` of whoever set an alarm and, when it fires, targets exactly that
+the `CLATCH_AGENT_ID` of whoever set an alarm and, when it fires, targets exactly that
 agent."*
 
 ## Signals (typed at declaration — Clapp v1)

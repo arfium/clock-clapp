@@ -158,11 +158,11 @@ struct AlarmRow: View {
         Button("Delete Alarm", role: .destructive) { store.cancel(id: alarm.id) }
     }
 
-    /// Compact "who it wakes" — one or two names, then "+k".
+    /// Compact "who it wakes" — resolve target ids → names, one or two, then "+k".
     private var wakesShort: String {
-        let t = alarm.targets
-        if t.count <= 2 { return t.joined(separator: ", ") }
-        return "\(t[0]) +\(t.count - 1)"
+        let names = alarm.targets.map { store.nameForId($0) ?? $0 }
+        if names.count <= 2 { return names.joined(separator: ", ") }
+        return "\(names[0]) +\(names.count - 1)"
     }
 
     /// Apple's `ALARM_DETAIL_FORMAT = "%1$@, %2$@"` → "{label}, {repeat}", with the
@@ -294,16 +294,17 @@ struct AlarmSheet: View {
     }
 
     /// A menu multi-select over the connected agents. "Everyone" (no selection) is the
-    /// broadcast default; picking names narrows the wake to exactly those agents.
+    /// broadcast default; picking narrows the wake. `targets` holds agent IDS (the wire
+    /// key); the menu shows names and toggles ids.
     private var agentPicker: some View {
         Menu {
             Button { targets = [] } label: {
                 if targets.isEmpty { Label("Everyone", systemImage: "checkmark") } else { Text("Everyone") }
             }
-            if !agentNames.isEmpty { Divider() }
-            ForEach(agentNames, id: \.self) { name in
-                Button { toggle(name) } label: {
-                    if targets.contains(name) { Label(name, systemImage: "checkmark") } else { Text(name) }
+            if !pickable.isEmpty { Divider() }
+            ForEach(pickable, id: \.0) { id, name in
+                Button { toggle(id) } label: {
+                    if targets.contains(id) { Label(name, systemImage: "checkmark") } else { Text(name) }
                 }
             }
         } label: {
@@ -318,16 +319,19 @@ struct AlarmSheet: View {
         .help("Which agent(s) this alarm wakes — everyone, or a chosen few")
     }
 
-    /// The roster ∪ any already-chosen names, so a target set from the CLI (or an agent
-    /// that has since disconnected) still shows and can be toggled off.
-    private var agentNames: [String] {
-        Array(Set(store.agents.map(\.name)).union(targets)).sorted()
+    /// (id, name) options: the roster ∪ any already-chosen agent no longer in it (set
+    /// from the CLI, or disconnected) so it still shows and can be toggled off.
+    private var pickable: [(String, String)] {
+        var seen = Set<String>(), out: [(String, String)] = []
+        for ag in store.agents where seen.insert(ag.id).inserted { out.append((ag.id, ag.name)) }
+        for id in targets where seen.insert(id).inserted { out.append((id, store.nameForId(id) ?? id)) }
+        return out.sorted { $0.1.lowercased() < $1.1.lowercased() }
     }
     private var wakesLabel: String {
-        targets.isEmpty ? "Everyone" : targets.sorted().joined(separator: ", ")
+        targets.isEmpty ? "Everyone" : targets.map { store.nameForId($0) ?? $0 }.sorted().joined(separator: ", ")
     }
-    private func toggle(_ name: String) {
-        if targets.contains(name) { targets.remove(name) } else { targets.insert(name) }
+    private func toggle(_ id: String) {
+        if targets.contains(id) { targets.remove(id) } else { targets.insert(id) }
     }
 
     private func save() {
