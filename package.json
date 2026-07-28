@@ -1,15 +1,24 @@
 {
-  "name": "clock",
-  "version": "0.1.0",
+  "name": "clock-clapp",
   "private": true,
-  "description": "clock — a Clatch alarm clock: the agent schedules its own timed wake-ups, the human sets alarms in the GUI.",
+  "version": "0.2.0",
+  "type": "module",
   "scripts": {
-    "build": "swift build -c release --package-path native",
-    "icon": "swift scripts/render-clock-icon.swift",
-    "chime": "swift scripts/render-chime.swift",
-    "package": "scripts/package.sh",
-    "dev-app": "scripts/macos-dev-app.sh",
-    "shortcut:macos": "scripts/macos-shortcut.sh",
-    "cli": "bin/clock"
+    "dev": "vite",
+    "build": "vite build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0"
   }
 }

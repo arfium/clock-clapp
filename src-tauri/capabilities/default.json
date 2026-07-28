@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The clock webview may call the app's commands and listen for state events.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:event:default", "core:window:default"]
+}

@@ -6,3 +6,9 @@ dist/
 *.log
 *.clapp
 *.clapp.sha256
+
+# Tauri / web build artifacts (tauri-test branch)
+node_modules/
+/pkg/
+src-tauri/target/
+src-tauri/gen/

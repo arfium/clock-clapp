@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>clock</title>
+    <script>
+      // Surface any load/parse/runtime failure instead of a blank screen.
+      window.addEventListener(
+        "error",
+        function (e) {
+          var r = document.getElementById("root");
+          var msg = e && e.target && e.target.src ? "failed to load " + e.target.src
+                  : (e && e.message) || String(e);
+          if (r) r.innerHTML =
+            '<pre style="padding:20px;color:#a00;white-space:pre-wrap;font:13px monospace">clock: ' + msg + "</pre>";
+        },
+        true
+      );
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div style="padding:24px;font:15px -apple-system,sans-serif;color:#666">Loading clock…</div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

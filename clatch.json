@@ -5,31 +5,24 @@
   "description": "A native clock — alarms and timers your agent sets for itself, and you set in the GUI.",
   "about": "Clatch has no cron; a scheduler is just an app that fires signals. Clock is that app, built like a real clock: a live analog face, drum-wheel alarms, and a countdown timer. The agent schedules its own alarms and timers over the CLI, the human sets them in the GUI, and when one is due it fires a run-type signal that wakes the agent(s) the alarm targets — chosen in the GUI (or with --to), defaulting to whoever set it.",
   "tags": ["utility", "productivity", "scheduler"],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocol": 2,
   "icon": "assets/icon.png",
   "launch": {
     "macos": "bin/clock",
+    "windows": "bin/clock.exe",
+    "linux": "bin/clock",
     "args": ["app"]
   },
   "connector": {
     "cli": "clock",
     "cliBin": "bin/clock",
     "commands": [
-      { "name": "now", "about": "print the current time" },
-      { "name": "list", "about": "list all alarms and timers" },
-      { "name": "alarm", "about": "set an alarm at a wall-clock time; --note is your prompt when it wakes you, --to picks which agent(s) it wakes" },
-      { "name": "edit", "about": "change an alarm's time, label, note, repeat, wake mode, or targets (--to)" },
-      { "name": "timer", "about": "start a countdown (fires timer.done when it ends)" },
-      { "name": "set", "about": "shorthand: a clock time makes an alarm, a duration a timer" },
-      { "name": "cancel", "about": "remove an alarm or timer by id" },
-      { "name": "toggle", "about": "enable or disable an alarm" },
-      { "name": "pause", "about": "pause a running timer" },
-      { "name": "resume", "about": "resume a paused timer" },
-      { "name": "focus", "about": "focus the app window" },
-      { "name": "show", "about": "open the window (the app runs fine without one)" },
-      { "name": "hide", "about": "send the app back to the background; alarms keep running" },
-      { "name": "close", "about": "quit the app — this is what stops the alarms" }
+      { "name": "list", "about": "list all alarms and timers, with who set/wakes each" },
+      { "name": "alarm", "about": "set an alarm at HH:MM; --note is your prompt when it wakes you, --repeat daily|weekdays|weekends, --to picks which agent(s) it wakes, --quiet notifies without a turn" },
+      { "name": "timer", "about": "start a countdown (10m, 1h30m, 90s) — fires timer.done when it ends" },
+      { "name": "cancel", "about": "remove an alarm or timer by id (aN alarm · tN timer)" },
+      { "name": "toggle", "about": "enable or disable an alarm" }
     ],
     "signals": [
       { "id": "alarm.fired", "type": "run" },
