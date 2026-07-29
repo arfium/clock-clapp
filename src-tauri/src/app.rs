@@ -106,6 +106,19 @@ fn show_window(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+    // Promoting to .regular builds a FRESH Dock tile, dropping any icon we set earlier
+    // while .accessory — a bare executable then falls back to the generic terminal icon.
+    // Re-assert it now that the tile exists. (chess never demotes, so it needn't do this.)
+    // Once synchronously, once on the next main-loop turn in case the tile isn't ready yet.
+    #[cfg(target_os = "macos")]
+    {
+        clappkit::set_dock_icon(ICON_PNG);
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = app.run_on_main_thread(|| clappkit::set_dock_icon(ICON_PNG));
+        });
+    }
 }
 
 /// `clock hide` / the red button: no window, no Dock tile, still alive and still ticking.
