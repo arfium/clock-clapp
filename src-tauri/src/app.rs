@@ -19,6 +19,24 @@ pub type SharedStore = Arc<Mutex<Store>>;
 const CLI: &str = "clock";
 const WINDOW: &str = "main";
 
+/// The app's own mark, embedded so the bare executable can set its Dock/taskbar icon at
+/// runtime — there is no `.app` bundle to carry it (docs/ICONS.md, docs/PLAYBOOK.md).
+const ICON_PNG: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icon.png"));
+
+/// Give this bare executable its own icon: the Dock on macOS, the window (hence taskbar)
+/// on Windows/Linux. Called on the main thread from `setup`, before the window shows.
+fn apply_icon(app: &AppHandle) {
+    clappkit::set_dock_icon(ICON_PNG);
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = main_window(app) {
+        if let Ok(img) = tauri::image::Image::from_bytes(ICON_PNG) {
+            let _ = w.set_icon(img);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app;
+}
+
 pub fn run() {
     // `clock app --background`: start with no window and no Dock tile — just the
     // scheduler and the socket. An agent setting an alarm shouldn't have to take over
@@ -39,6 +57,9 @@ pub fn run() {
         .manage(control.clone())
         .setup(move |app| {
             let handle = app.handle().clone();
+            // Set the app's own icon before anything shows, so the Dock/taskbar never
+            // flashes the generic tile.
+            apply_icon(&handle);
             // The window is created hidden (tauri.conf.json `"visible": false`) and the
             // policy demoted first, so a background start never flashes a Dock icon;
             // `show_window` promotes us back to .regular the moment there IS a window.

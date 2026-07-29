@@ -25,10 +25,15 @@
         "hiddenTitle": true
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": false,
-    "icon": ["../assets/icon.png"]
+    "icon": [
+      "icons/icon.ico",
+      "../assets/icon.png"
+    ]
   }
 }
