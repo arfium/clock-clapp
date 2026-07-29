@@ -1,139 +1,89 @@
-import { useEffect, useMemo, useState } from "react";
-import { cmd, onState, type Alarm, type ClockState, type Timer } from "./bridge";
+// The window (`ClockRoot.swift`). Apple's Clock puts its tabs in a segmented control
+// as the window's *principal* toolbar item — the segments ARE the title, so there is no
+// title text at all. We host our own chrome, so we draw the same relationship: a
+// segmented control centred at the top, nothing beside it.
+//
+// The selected segment is deliberately NOT orange: macOS renders segmented selection
+// with `unemphasizedSelectedContentBackgroundColor`, a neutral chip.
+
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { cmd, onFired, onState, EMPTY, type ClockState } from "./bridge";
+import { AlarmsView, type Run } from "./AlarmsView";
+import { armChime, playChime } from "./chime";
+import { ClockTab } from "./ClockTab";
+import { TimerView } from "./TimerView";
+import { IconAlarm, IconClock, IconTimer } from "./icons";
+
+type Tab = "clock" | "alarms" | "timers";
+
+const TABS: { id: Tab; icon: ReactNode; title: string }[] = [
+  { id: "clock", icon: <IconClock size={13} />, title: "Clock" },
+  { id: "alarms", icon: <IconAlarm size={13} />, title: "Alarms" },
+  { id: "timers", icon: <IconTimer size={13} />, title: "Timers" },
+];
 
 export default function App() {
-  const [state, setState] = useState<ClockState>({ alarms: [], timers: [] });
-  const [now, setNow] = useState(new Date());
+  const [state, setState] = useState<ClockState>(EMPTY);
+  const [tab, setTab] = useState<Tab>("clock");
 
   useEffect(() => {
-    let un: (() => void) | undefined;
-    onState(setState).then((f) => (un = f));
-    cmd({ cmd: "state" }).then(setState).catch(() => {});
-    const t = setInterval(() => setNow(new Date()), 1000);
+    let unState: (() => void) | undefined;
+    let unFired: (() => void) | undefined;
+    onState(setState).then((f) => (unState = f)).catch(() => {});
+    // Every fire rings the chime, exactly as the Swift app's `onFire()` did — the signal
+    // wakes the agent, the chime is the human's cue.
+    onFired(playChime).then((f) => (unFired = f)).catch(() => {});
+    const disarm = armChime();
+    cmd({ cmd: "state" })
+      .then((s) => s && setState(s))
+      .catch(() => {});
     return () => {
-      un?.();
-      clearInterval(t);
+      unState?.();
+      unFired?.();
+      disarm();
     };
   }, []);
 
-  const run = (req: unknown) => cmd(req).then(setState).catch(() => {});
-
-  return (
-    <div className="app">
-      <ClockFace now={now} />
-      <Section title="Alarms">
-        <AddAlarm onAdd={run} />
-        {state.alarms.length === 0 && <p className="empty">No alarms yet.</p>}
-        {state.alarms.map((a) => (
-          <AlarmRow key={a.id} a={a} onCancel={() => run({ cmd: "cancel", id: a.id })} onToggle={() => run({ cmd: "toggle", id: a.id })} />
-        ))}
-      </Section>
-      <Section title="Timers">
-        <AddTimer onAdd={run} />
-        {state.timers.length === 0 && <p className="empty">No timers running.</p>}
-        {state.timers.map((t) => (
-          <TimerRow key={t.id} t={t} onCancel={() => run({ cmd: "cancel", id: t.id })} />
-        ))}
-      </Section>
-    </div>
-  );
-}
-
-function ClockFace({ now }: { now: Date }) {
-  const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-  return (
-    <div className="face">
-      <div className="time">{time}</div>
-      <div className="date">{date}</div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="section">
-      <h2>{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function AddAlarm({ onAdd }: { onAdd: (r: unknown) => void }) {
-  const [when, setWhen] = useState("07:30");
-  const [label, setLabel] = useState("");
-  const [repeat, setRepeat] = useState("once");
-  const submit = () => {
-    onAdd({ cmd: "alarm", when, label, repeat });
-    setLabel("");
+  /// Every mutation goes through the ONE Rust command handler; the fresh snapshot comes
+  /// straight back (and rides the `state` event to any other window).
+  const run: Run = (req) => {
+    cmd(req)
+      .then((s) => s && setState(s))
+      .catch(() => {});
   };
-  return (
-    <div className="add">
-      <input className="i-time" type="time" value={when} onChange={(e) => setWhen(e.target.value)} />
-      <input className="i-label" placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-      <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
-        <option value="once">Once</option>
-        <option value="daily">Every day</option>
-        <option value="weekdays">Weekdays</option>
-        <option value="weekends">Weekends</option>
-      </select>
-      <button className="primary" onClick={submit}>Add</button>
-    </div>
-  );
-}
 
-function AlarmRow({ a, onCancel, onToggle }: { a: Alarm; onCancel: () => void; onToggle: () => void }) {
+  // Ascending by (hour, minute, id) — id compares as a string, like `sortAlarms()`.
+  const alarms = useMemo(
+    () =>
+      [...state.alarms].sort(
+        (a, b) => a.hour - b.hour || a.minute - b.minute || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      ),
+    [state.alarms]
+  );
+
   return (
-    <div className={"row" + (a.enabled ? "" : " off")}>
-      <button className="dot" onClick={onToggle} title={a.enabled ? "on" : "off"} />
-      <div className="grow">
-        <div className="line1">
-          <span className="big">{a.time}</span>
-          {a.label && <span className="lbl">{a.label}</span>}
-        </div>
-        <div className="line2">
-          {a.repeat !== "Once" && <span>{a.repeat}</span>}
-          <span>→ {a.wakes}</span>
-          {a.owner && <span>by {a.owner}</span>}
-          {a.note && <span className="note">“{a.note}”</span>}
+    <div className="root">
+      <div className="tabbar">
+        <div className="seg" role="tablist">
+          {TABS.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              title={t.title}
+              className={"seg-btn" + (tab === t.id ? " on" : "")}
+              onClick={() => setTab(t.id)}
+            >
+              {t.icon}
+            </button>
+          ))}
         </div>
       </div>
-      <button className="x" onClick={onCancel}>✕</button>
-    </div>
-  );
-}
 
-function AddTimer({ onAdd }: { onAdd: (r: unknown) => void }) {
-  const [dur, setDur] = useState("5m");
-  const [label, setLabel] = useState("");
-  const submit = () => {
-    onAdd({ cmd: "timer", dur, label });
-    setLabel("");
-  };
-  return (
-    <div className="add">
-      <input className="i-dur" placeholder="10m · 1h30m · 90s" value={dur} onChange={(e) => setDur(e.target.value)} />
-      <input className="i-label" placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-      <button className="primary" onClick={submit}>Start</button>
-    </div>
-  );
-}
-
-function TimerRow({ t, onCancel }: { t: Timer; onCancel: () => void }) {
-  const pct = useMemo(() => (t.total > 0 ? Math.max(0, Math.min(1, t.remaining / t.total)) : 0), [t.remaining, t.total]);
-  return (
-    <div className="row">
-      <div className="ring" style={{ background: `conic-gradient(var(--accent) ${pct * 360}deg, var(--track) 0)` }}>
-        <div className="ring-in" />
-      </div>
-      <div className="grow">
-        <div className="line1">
-          <span className="big mono">{t.done ? "Done" : t.remainingText}</span>
-          {t.label && <span className="lbl">{t.label}</span>}
-        </div>
-        {t.owner && <div className="line2"><span>by {t.owner}</span></div>}
-      </div>
-      <button className="x" onClick={onCancel}>✕</button>
+      {tab === "clock" && <ClockTab alarms={alarms} />}
+      {tab === "alarms" && <AlarmsView alarms={alarms} agents={state.agents} run={run} />}
+      {tab === "timers" && <TimerView timers={state.timers} run={run} />}
     </div>
   );
 }
