@@ -1,12 +1,24 @@
-# CI (KISS): one macOS job that proves the template still builds and packages.
-# The template is macOS/SwiftUI, so CI runs on macОS only. `clatch validate` needs
-# the private Clatch binary, so it is not run here — `swift build` + packaging is
-# the gate.
+# CI: prove the app still compiles, tests and packages on every OS its manifest claims.
+#
+# `clatch.json`'s `launch` keys ARE the platform claim (docs/protocol.md §1), and this app
+# declares macos, windows and linux — so a one-platform gate would let a Windows or Linux
+# break land on the very branch that introduced cross-platform support.
+#
+# ⚠ BLOCKED, STATED PLAINLY: `src-tauri/Cargo.toml` depends on `../../clappkit`, which in
+#   turn depends on `../../clatch/crates/*` — sibling checkouts that are not (yet) git
+#   repositories this workflow can fetch. Until they are, set the repository variables
+#   CLAPPKIT_REPO and CLATCH_REPO (e.g. `arfium/clappkit`, `arfium/clatch`) and this
+#   workflow works as written; without them the sibling step fails fast and says so
+#   rather than pretending a build happened. Do not "fix" it by deleting the matrix.
+#
+# `clatch validate` needs the private Clatch binary, so it is not run here; build + test +
+# package is the gate. The socket round-trip in `npm run verify` needs a desktop session,
+# so it stays a local pre-commit gate.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, tauri-test]
   pull_request:
 
 concurrency:
@@ -17,11 +29,71 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: macos-14
+  # The self-contained gate: does clatch.json still describe this code? Runs everywhere,
+  # needs no sibling checkout, and is GREEN today — the one agreement nothing else checks.
+  manifest:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build (release)
-        run: swift build -c release --package-path native
-      - name: Package
-        run: sh scripts/package.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/check-manifest.mjs
+
+  # The full gate. SKIPPED (not failed) until clappkit and clatch are git repositories the
+  # runner can fetch: set the repository variables CLAPPKIT_REPO and CLATCH_REPO to their
+  # slugs and this runs on all three platforms clatch.json's launch keys claim. A red X
+  # nobody can fix teaches people to ignore CI, so it stays skipped instead.
+  build:
+    if: vars.CLAPPKIT_REPO != '' && vars.CLATCH_REPO != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash # scripts/*.sh run under Git Bash on windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.CLAPPKIT_REPO }}
+          path: _siblings/clappkit
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.CLATCH_REPO }}
+          path: _siblings/clatch
+      - name: Place the sibling crates where Cargo.toml expects them
+        run: |
+          set -eu
+          mkdir -p ../clappkit ../../clatch
+          cp -R _siblings/clappkit/. ../clappkit/
+          cp -R _siblings/clatch/. ../../clatch/
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Linux GUI dependencies (webkit2gtk — Tauri's webview)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      - run: npm ci
+
+      - name: Test
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml
+
+      # Builds the frontend, builds the binary THROUGH the Tauri CLI (so the frontend is
+      # embedded, not fetched from a dev URL), bundles the app's extras, vendors the
+      # host's node, and asserts the manifest and the depot agree.
+      - name: Build + package
+        run: npm run --silent package

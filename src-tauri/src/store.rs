@@ -14,14 +14,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-/// A signal the scheduler wants Clatch to deliver — drained by the task that owns the
-/// control-pipe `Client` (the Store never touches the pipe itself).
-#[derive(Debug, Clone)]
-pub struct Emit {
-    pub id: String,          // "alarm.fired" | "alarm.quiet" | "timer.done" | "alarm.set"
-    pub target: Vec<String>, // agent ids ([] = broadcast)
-    pub payload: Value,
-}
+/// The signal an app's pure state layer wants sent, and the roster row it displays, both
+/// from clappkit: four apps had declared the identical structs locally and their roster
+/// projections had already forked three ways.
+pub use clappkit::{AgentRow, Emit};
+
+/// The longest countdown `clock timer` will start: one year. Beyond that the addition to
+/// `Local::now()` overflows `i64` — a panic in a debug build, and in release a wrapped
+/// negative `endAt` that "completes" on the very next tick.
+const MAX_TIMER_SECS: i64 = 365 * 86_400;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Days — repeat-day parsing/summary. Calendar weekday numbering: 1=Sun … 7=Sat,
@@ -32,6 +33,13 @@ pub mod days {
     use std::collections::BTreeSet;
 
     pub const SHORT: [&str; 8] = ["", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    /// The only weekday numbers this app understands (1=Sun … 7=Sat). Anything else on
+    /// disk is dropped at decode: the load path is deliberately lenient so one bad field
+    /// cannot wipe every alarm, and a value it lets through must never reach an index.
+    pub fn valid(d: u32) -> bool {
+        (1..=7).contains(&d)
+    }
 
     fn set(v: &[u32]) -> BTreeSet<u32> {
         v.iter().copied().collect()
@@ -78,7 +86,14 @@ pub mod days {
         if *days == set(&[1, 7]) {
             return "Weekends".into();
         }
-        days.iter().map(|d| SHORT[*d as usize]).collect::<Vec<_>>().join(" ")
+        // Total lookup, never an index: a hand-edited or older-build `repeatDays: [9]`
+        // used to panic here, and `summary` runs for every alarm in every snapshot — so
+        // the crash repeated on every command AND on every 1-second tick.
+        days.iter()
+            .filter_map(|d| SHORT.get(*d as usize).copied())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -148,10 +163,15 @@ fn yes() -> bool {
 impl<'de> Deserialize<'de> for Alarm {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Alarm, D::Error> {
         let a = AlarmDisk::deserialize(d)?;
-        let repeat_days = a
+        // Range-check at the boundary, the same filter the wire (`days_from`) applies:
+        // a lenient decode must not admit a weekday the rest of the app cannot name.
+        let repeat_days: BTreeSet<u32> = a
             .repeat_days
             .or_else(|| a.repeat_legacy.as_deref().map(days::parse))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|d| days::valid(*d))
+            .collect();
         // A stored alarm without `targets` falls back to its owner (or broadcast).
         let targets = a.targets.unwrap_or_else(|| a.owner.iter().cloned().collect());
         Ok(Alarm {
@@ -266,26 +286,29 @@ impl Timer {
     }
 }
 
-/// One bound agent, mirrored from the control pipe's roster (for id ↔ name display).
-#[derive(Clone, Default)]
-pub struct AgentRow {
-    pub id: String,
-    pub name: String,
-    pub backend: String,
-    pub model: Option<String>,
-}
-
 pub struct Store {
     pub alarms: Vec<Alarm>,
     pub timers: Vec<Timer>,
     next_a: u32,
     next_t: u32,
+    /// The bound agents, mirrored from the control pipe's roster (for id ↔ name display).
+    /// Not persisted — Clatch owns it and re-pushes it on every bind change.
     agents: Vec<AgentRow>,
+    /// Something durable changed since the last `save`. The read-only verbs (`state`,
+    /// `list`, `now`) leave it false, so `clock now` no longer rewrites clock.json.
+    dirty: bool,
 }
 
 impl Default for Store {
     fn default() -> Store {
-        Store { alarms: Vec::new(), timers: Vec::new(), next_a: 1, next_t: 1, agents: Vec::new() }
+        Store {
+            alarms: Vec::new(),
+            timers: Vec::new(),
+            next_a: 1,
+            next_t: 1,
+            agents: Vec::new(),
+            dirty: false,
+        }
     }
 }
 
@@ -308,8 +331,17 @@ impl Store {
         self.agents = agents;
     }
 
+    /// Whether anything durable changed since the last call, clearing the flag. The one
+    /// gate on `save`: a pure read must not rewrite the store (and must not take the
+    /// blocking write with the lock held while the scheduler waits for it).
+    pub fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+
     /// Resolve an agent id → its current display name (falls back to the id if the agent
-    /// left the roster). Name is display-only; id is the wire key.
+    /// left the roster). Name is display-only; id is the wire key. This reads the store's
+    /// own roster mirror rather than `Control::name_of`, because `handle` is sync and
+    /// side-effect-free by design — it never touches the pipe.
     fn name_for(&self, id: &str) -> Option<String> {
         self.agents.iter().find(|a| a.id == id).map(|a| a.name.clone())
     }
@@ -388,6 +420,9 @@ impl Store {
                 }
             }
         }
+        if !emits.is_empty() {
+            self.dirty = true; // lastFired / the one-shot disable must survive a restart
+        }
         emits
     }
 
@@ -441,6 +476,13 @@ impl Store {
         let cmd = req.get("cmd").and_then(Value::as_str).unwrap_or("");
         let text = |k: &str| req.get(k).and_then(Value::as_str);
         let mut emits = Vec::new();
+
+        // Only the three pure reads leave the store clean. Marking every other verb dirty
+        // — including one that goes on to fail — keeps the old always-save behaviour for
+        // anything that could have mutated, and costs one needless write on a rejection.
+        if !matches!(cmd, "state" | "list" | "now") {
+            self.dirty = true;
+        }
 
         let resp = match cmd {
             // `now` is `list` without the listing — the snapshot already carries `nowText`.
@@ -562,8 +604,12 @@ impl Store {
                     .or_else(|| parse_dur(raw))
                     .or_else(|| raw.trim().parse::<i64>().ok())
                     .unwrap_or(0);
-                if secs <= 0 {
-                    return (err("bad duration — use e.g. 10m, 1h30m, 90s"), emits);
+                // Clamped, not just positive: `clock timer 9223372036854775807s` parses
+                // cleanly (parse_dur is overflow-checked) and then overflowed the
+                // `now + seconds` addition — a panic in a debug build, an instantly-
+                // "done" timer in release. The ceiling is also the actionable message.
+                if secs <= 0 || secs > MAX_TIMER_SECS {
+                    return (err("bad duration — use e.g. 10m, 1h30m, 90s (max 365d)"), emits);
                 }
                 let t = self.add_timer(secs, text("label").unwrap_or("").trim().to_string(), caller.clone());
                 let id = t.id.clone();
@@ -690,7 +736,10 @@ impl Store {
             id: format!("t{}", self.next_t),
             label,
             total: seconds,
-            end_at: Local::now().timestamp() + seconds,
+            // Checked even though the caller clamps to MAX_TIMER_SECS: this is the one
+            // arithmetic in the store that can overflow, and a panic here kills the IPC
+            // task mid-request (the agent sees "the app closed the connection").
+            end_at: Local::now().timestamp().saturating_add(seconds),
             paused: None,
             done: false,
             owner: caller,
@@ -707,18 +756,25 @@ impl Store {
 
     // MARK: projection for GUI + CLI
 
+    /// Every view of the store — the CLI's response, the webview's invoke reply, and the
+    /// pushed `state` event — is one of these, stamped with a monotonic `rev` so the two
+    /// writers feeding the window cannot drag it backwards (clappkit::snapshot).
     pub fn snapshot(&self) -> Value {
         let now = Local::now();
-        json!({
+        clappkit::snapshot::with_rev(json!({
             "ok": true,
             "now": now.timestamp(),
             "nowText": now.format("%b %-d %H:%M:%S").to_string(),
             "alarms": self.alarms.iter().map(|a| self.alarm_dto(a, now)).collect::<Vec<_>>(),
             "timers": self.timers.iter().map(|t| self.timer_dto(t, now.timestamp())).collect::<Vec<_>>(),
             "agents": self.agents.iter().map(|a| json!({
-                "id": a.id, "name": a.name, "backend": a.backend, "model": a.model,
+                "id": a.id, "name": a.name,
+                // clappkit's AgentRow is `Option<String>` (Clatch sends "" when it has
+                // nothing); the wire keeps the empty string it has always carried.
+                "backend": a.backend.clone().unwrap_or_default(),
+                "model": a.model, "avatar": a.avatar,
             })).collect::<Vec<_>>(),
-        })
+        }))
     }
 
     fn alarm_dto(&self, a: &Alarm, now: DateTime<Local>) -> Value {
@@ -805,44 +861,38 @@ impl Store {
         }
     }
 
-    // MARK: persistence (CLATCH_DATA_DIR, falling back to ~/.clock)
+    // MARK: persistence — clappkit owns WHERE it lives and HOW it is written
 
+    /// `$CLATCH_DATA_DIR/clock.json`, else `~/.clock/clock.json` (`%LOCALAPPDATA%\clock`
+    /// on Windows). One resolver for every clapp: `PathBuf::join` rather than a
+    /// hand-interpolated `"{home}/.clock"`, an empty `CLATCH_DATA_DIR` treated as unset
+    /// (it used to send the store into the process cwd — the install dir under Clatch),
+    /// and no `"."` fallback at all.
     pub fn path() -> std::path::PathBuf {
-        let dir = std::env::var("CLATCH_DATA_DIR").ok().unwrap_or_else(|| {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_else(|_| ".".into());
-            format!("{home}/.clock")
-        });
-        let _ = std::fs::create_dir_all(&dir);
-        // User-private, like the Swift app's 0700 runtime dir.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-        }
-        std::path::Path::new(&dir).join("clock.json")
+        clappkit::paths::data_file("clock", "clock.json")
     }
 
     pub fn load() -> Store {
         let mut store = Store::default();
-        if let Ok(text) = std::fs::read_to_string(Store::path()) {
-            if let Ok(p) = serde_json::from_str::<Persist>(&text) {
-                store.alarms = p.alarms;
-                // Drop finished timers on load; a still-running one that expired while we
-                // were closed fires on the first tick (its endAt is already past).
-                store.timers = p.timers.into_iter().filter(|t| !t.done).collect();
-                // Advance the id counters past the highest id actually on disk.
-                let hi_a = store.alarms.iter().map(|a| suffix(&a.id)).max().unwrap_or(0);
-                let hi_t = store.timers.iter().map(|t| suffix(&t.id)).max().unwrap_or(0);
-                store.next_a = p.next_a.max(hi_a + 1).max(1);
-                store.next_t = p.next_t.max(hi_t + 1).max(1);
-                store.sort_alarms();
-            }
-        }
+        let Some(p) = clappkit::store::load_json::<Persist>(&Store::path()) else {
+            return store; // first run, or a damaged file clappkit already reported
+        };
+        store.alarms = p.alarms;
+        // Drop finished timers on load; a still-running one that expired while we
+        // were closed fires on the first tick (its endAt is already past).
+        store.timers = p.timers.into_iter().filter(|t| !t.done).collect();
+        // Advance the id counters past the highest id actually on disk.
+        let hi_a = store.alarms.iter().map(|a| suffix(&a.id)).max().unwrap_or(0);
+        let hi_t = store.timers.iter().map(|t| suffix(&t.id)).max().unwrap_or(0);
+        store.next_a = p.next_a.max(hi_a + 1).max(1);
+        store.next_t = p.next_t.max(hi_t + 1).max(1);
+        store.sort_alarms();
         store
     }
 
+    /// Write the alarms and timers out. clappkit's `save_json` is tmp → fsync → rename →
+    /// directory fsync, at mode 0600 — so a power loss cannot leave a truncated file that
+    /// the lenient load path would read as "fresh install" and silently start empty from.
     pub fn save(&self) {
         let p = Persist {
             alarms: self.alarms.clone(),
@@ -850,13 +900,7 @@ impl Store {
             next_a: self.next_a,
             next_t: self.next_t,
         };
-        if let Ok(text) = serde_json::to_string_pretty(&p) {
-            let path = Store::path();
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, &path); // atomic replace (valid on Windows too)
-            }
-        }
+        clappkit::store::save_json(&Store::path(), &p);
     }
 }
 
@@ -1354,6 +1398,89 @@ mod tests {
         assert!(text.contains(r#""endAt":"2026-07-29T11:30:00Z""#));
         assert!(text.contains(r#""nextA""#));
         serde_json::from_str::<Persist>(&text).unwrap();
+    }
+
+    /// A hand-edited (or older-build) clock.json used to index `SHORT[9]` and panic — in
+    /// `snapshot`, i.e. on every command AND every 1-second tick, so the app crash-looped
+    /// and only a manual edit of the file could stop it.
+    #[test]
+    fn an_out_of_range_repeat_day_is_dropped_not_indexed() {
+        let bad = r#"{ "alarms": [{ "id": "a1", "hour": 7, "minute": 30,
+                        "repeatDays": [0, 2, 9, 255] }], "timers": [] }"#;
+        let p: Persist = serde_json::from_str(bad).unwrap();
+        assert_eq!(p.alarms[0].repeat_days, [2].into_iter().collect::<BTreeSet<u32>>());
+        assert_eq!(days::summary(&p.alarms[0].repeat_days), "Mon");
+        // …and the projection that used to panic now runs.
+        let mut s = store();
+        s.alarms = p.alarms;
+        assert_eq!(s.snapshot()["alarms"][0]["repeat"], json!("Mon"));
+        // Belt and braces: even a set that somehow held a bad day only loses that day.
+        assert_eq!(days::summary(&[9, 2].into_iter().collect()), "Mon");
+    }
+
+    /// `clock timer 9223372036854775807s` parsed cleanly and then overflowed
+    /// `now + seconds`: a panic in debug, an instantly-"done" timer in release.
+    #[test]
+    fn an_absurd_duration_is_refused_instead_of_overflowing() {
+        let mut s = store();
+        let (r, _) = s.handle(&json!({ "cmd": "timer", "seconds": i64::MAX }), None);
+        assert_eq!(r["ok"], json!(false));
+        assert!(r["error"].as_str().unwrap().contains("365d"));
+        assert!(s.timers.is_empty());
+        assert_eq!(s.handle(&json!({ "cmd": "timer", "dur": "9223372036854775807s" }), None).0["ok"], json!(false));
+        // The ceiling itself is still accepted.
+        assert_eq!(s.handle(&json!({ "cmd": "timer", "seconds": MAX_TIMER_SECS }), None).0["ok"], json!(true));
+    }
+
+    /// `clock now` used to serialise and rewrite the whole store — on a verb the help
+    /// text presents as the cheapest possible query.
+    #[test]
+    fn only_mutations_mark_the_store_dirty() {
+        let mut s = store();
+        s.take_dirty();
+        for read in ["state", "list", "now"] {
+            s.handle(&json!({ "cmd": read }), None);
+            assert!(!s.take_dirty(), "`{read}` must not rewrite clock.json");
+        }
+        s.handle(&json!({ "cmd": "alarm", "when": "7:30" }), None);
+        assert!(s.take_dirty(), "a mutation must persist");
+        assert!(!s.take_dirty(), "and the flag clears once taken");
+        // A firing tick persists too — lastFired and the one-shot disable must survive.
+        s.handle(&json!({ "cmd": "alarm", "hour": 4, "minute": 5 }), None);
+        s.take_dirty();
+        assert!(s.tick(at(4, 5)).len() == 1 && s.take_dirty());
+        assert!(s.tick(at(4, 5)).is_empty() && !s.take_dirty());
+    }
+
+    /// The snapshot carries the ordering the front end drops stale invoke replies by.
+    #[test]
+    fn every_snapshot_is_stamped_with_a_rising_rev() {
+        let s = store();
+        let a = s.snapshot()["rev"].as_u64().unwrap();
+        let b = s.snapshot()["rev"].as_u64().unwrap();
+        assert!(b > a && a > 0);
+    }
+
+    /// clappkit's AgentRow normalises Clatch's empty strings to `None`; the emitted JSON
+    /// must not change shape for the webview, which types `backend` as a plain string.
+    #[test]
+    fn the_roster_projection_keeps_its_wire_shape() {
+        let mut s = Store::default();
+        s.set_agents(vec![
+            AgentRow { id: "1001".into(), name: "alice".into(), ..Default::default() },
+            AgentRow {
+                id: "1002".into(),
+                name: "bob".into(),
+                backend: Some("claude-code".into()),
+                model: Some("opus".into()),
+                ..Default::default()
+            },
+        ]);
+        let snap = s.snapshot();
+        assert_eq!(snap["agents"][0]["backend"], json!("")); // never null
+        assert_eq!(snap["agents"][0]["model"], Value::Null); // blank-filtered, not ""
+        assert_eq!(snap["agents"][1]["backend"], json!("claude-code"));
+        assert_eq!(snap["agents"][1]["model"], json!("opus"));
     }
 
     #[test]

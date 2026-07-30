@@ -20,6 +20,7 @@
     "commands": [
       { "name": "now", "about": "print the current time" },
       { "name": "list", "about": "list all alarms and timers (shows who each wakes)" },
+      { "name": "state", "about": "alias for list" },
       { "name": "alarm", "about": "set an alarm at a wall-clock time; --note is your prompt for the turn it wakes, --repeat daily|weekdays|weekends|mon,wed,fri, --to picks which agent(s) it wakes, --quiet fires as context without a turn" },
       { "name": "edit", "about": "change an alarm; omitted flags keep their value (--time --label --note --repeat --quiet --wake --to)" },
       { "name": "timer", "about": "start a countdown (10m, 1h30m, 90s) — fires timer.done when it ends" },

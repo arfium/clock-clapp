@@ -7,8 +7,8 @@
 // with `unemphasizedSelectedContentBackgroundColor`, a neutral chip.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { cmd, onFired, onState, EMPTY, type ClockState } from "./bridge";
-import { AlarmsView, type Run } from "./AlarmsView";
+import { onFired, normalize, useSnapshot, EMPTY, type ClockState, type Req } from "./bridge";
+import { AlarmsView } from "./AlarmsView";
 import { armChime, playChime } from "./chime";
 import { ClockTab } from "./ClockTab";
 import { TimerView } from "./TimerView";
@@ -23,34 +23,29 @@ const TABS: { id: Tab; icon: ReactNode; title: string }[] = [
 ];
 
 export default function App() {
-  const [state, setState] = useState<ClockState>(EMPTY);
   const [tab, setTab] = useState<Tab>("clock");
 
+  /// Subscribe to `state`, ask for the first snapshot on mount, and discard any snapshot
+  /// older than the one already held — the invoke reply and the scheduler's pushed event
+  /// race every second, and the loser must not win. `run` is the one way a mutation
+  /// reaches the Rust command handler; the fresh snapshot comes straight back.
+  const { state, run } = useSnapshot<ClockState, Req>(EMPTY, { normalize });
+
   useEffect(() => {
-    let unState: (() => void) | undefined;
-    let unFired: (() => void) | undefined;
-    onState(setState).then((f) => (unState = f)).catch(() => {});
     // Every fire rings the chime, exactly as the Swift app's `onFire()` did — the signal
     // wakes the agent, the chime is the human's cue.
-    onFired(playChime).then((f) => (unFired = f)).catch(() => {});
-    const disarm = armChime();
-    cmd({ cmd: "state" })
-      .then((s) => s && setState(s))
+    let dead = false;
+    let unFired: (() => void) | undefined;
+    onFired(playChime)
+      .then((f) => (dead ? f() : (unFired = f)))
       .catch(() => {});
+    const disarm = armChime();
     return () => {
-      unState?.();
+      dead = true;
       unFired?.();
       disarm();
     };
   }, []);
-
-  /// Every mutation goes through the ONE Rust command handler; the fresh snapshot comes
-  /// straight back (and rides the `state` event to any other window).
-  const run: Run = (req) => {
-    cmd(req)
-      .then((s) => s && setState(s))
-      .catch(() => {});
-  };
 
   // Ascending by (hour, minute, id) — id compares as a string, like `sortAlarms()`.
   const alarms = useMemo(

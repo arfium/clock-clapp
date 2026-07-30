@@ -1,13 +1,20 @@
 #!/usr/bin/env sh
-# Dev entrypoint: build-if-needed, then exec the real binary. In dist/ this file is
-# REPLACED by the compiled binary (scripts/package.sh).
+# Dev entrypoint: build-if-needed, then exec the real binary — so `bin/clock list` works
+# from a fresh checkout, and `PATH=$PWD/bin:$PATH` gives you the agent's CLI while hacking.
+#
+# This used to run `swift build` and exec native/.build/release/clock, which after the
+# Tauri port meant it silently built and drove the RETIRED Swift app. It now goes through
+# scripts/build.sh, i.e. the Tauri CLI — the only build that embeds the frontend.
+#
+# In the depot this file does not appear at all: scripts/package.sh assembles pkg/, and
+# pkg/bin/clock IS the compiled binary.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-BIN="$ROOT/native/.build/release/clock"
+BIN="$ROOT/src-tauri/target/release/clock"
 
 if [ ! -x "$BIN" ]; then
-  (cd "$ROOT/native" && swift build -c release >/dev/null)
+  "$ROOT/scripts/build.sh" >/dev/null
 fi
 
 exec "$BIN" "$@"

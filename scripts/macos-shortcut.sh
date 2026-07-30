@@ -3,9 +3,12 @@
 # that goes THROUGH Clatch. usage: scripts/macos-shortcut.sh /abs/path/to/clatch [Clock.app]
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-CLATCH_BIN="${1:-$(command -v clatch || true)}"
-APP="${2:-$ROOT/dist/Clock.app}"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+
+CLATCH_BIN="${1:-$(find_clatch || true)}"
+APP="${2:-$ROOT/build/Clock.app}"
+ID="$(manifest id)"
+VERSION="$(manifest version)"
 
 if [ -z "$CLATCH_BIN" ] || [ ! -x "$CLATCH_BIN" ]; then
   printf '%s\n' "usage: scripts/macos-shortcut.sh /absolute/path/to/clatch [Clock.app]" >&2
@@ -13,14 +16,14 @@ if [ -z "$CLATCH_BIN" ] || [ ! -x "$CLATCH_BIN" ]; then
 fi
 
 CONTENTS="$APP/Contents"; MACOS="$CONTENTS/MacOS"; RESOURCES="$CONTENTS/Resources"
-ICONSET="$ROOT/dist/clock.iconset"
+ICONSET="$ROOT/build/clock.iconset"
 
 rm -rf "$APP" "$ICONSET"
 mkdir -p "$MACOS" "$RESOURCES" "$ICONSET"
 
 cat >"$MACOS/clock-launcher" <<EOF
 #!/bin/sh
-exec "$CLATCH_BIN" run com.arfium.clock
+exec "$CLATCH_BIN" run $ID
 EOF
 chmod +x "$MACOS/clock-launcher"
 
@@ -37,12 +40,14 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
   <key>CFBundleIdentifier</key><string>com.arfium.clock.shortcut</string>
   <key>CFBundleName</key><string>Clock</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
 </plist>
 EOF
+
+sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/" "$CONTENTS/Info.plist"
 
 if [ -f "$ROOT/assets/icon.png" ]; then
   for spec in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" \

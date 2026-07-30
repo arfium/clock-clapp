@@ -8,7 +8,7 @@
 //   • The switch is GREEN, never the app accent.
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { Alarm, AgentRow } from "./bridge";
+import type { Alarm, AgentRow, Req } from "./bridge";
 import { DAY_LETTER, hm, splitTime } from "./format";
 import { IconNote, IconPlus, IconEllipsis, IconUpDown } from "./icons";
 import { TimeWheel } from "./WheelPicker";
@@ -25,7 +25,7 @@ import {
   type MenuItem,
 } from "./ui";
 
-export type Run = (req: Record<string, unknown>) => void;
+export type Run = (req: Req) => void;
 
 const nameFor = (agents: AgentRow[], id: string) => agents.find((a) => a.id === id)?.name ?? id;
 

@@ -6,9 +6,14 @@
 //! drops the app to the background (macOS `.accessory`), `clock app --background` starts
 //! with no window at all, and `clock close` is the ONE thing that ends the process —
 //! a clock that stops keeping time when you close its window is not a clock.
+//!
+//! Everything generic here is clappkit's: the icon dance, the window verbs, the IPC
+//! relay, the roster projection. What is left is the parts that are actually clock's —
+//! the background-start flag, the `ExitRequested` guard, and the 1-second scheduler.
 
-use crate::store::{AgentRow, Store};
-use clappkit::{ipc, Control};
+use crate::store::Store;
+use clappkit::app::Reply;
+use clappkit::{Control, WindowPolicy};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,24 +22,17 @@ use tokio::sync::Mutex;
 
 pub type SharedStore = Arc<Mutex<Store>>;
 const CLI: &str = "clock";
-const WINDOW: &str = "main";
 
 /// The app's own mark, embedded so the bare executable can set its Dock/taskbar icon at
 /// runtime — there is no `.app` bundle to carry it (docs/ICONS.md, docs/PLAYBOOK.md).
 const ICON_PNG: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icon.png"));
 
-/// Give this bare executable its own icon: the Dock on macOS, the window (hence taskbar)
-/// on Windows/Linux. Called on the main thread from `setup`, before the window shows.
-fn apply_icon(app: &AppHandle) {
-    clappkit::set_dock_icon(ICON_PNG);
-    #[cfg(not(target_os = "macos"))]
-    if let Some(w) = main_window(app) {
-        if let Ok(img) = tauri::image::Image::from_bytes(&clappkit::dock_icon(ICON_PNG)) {
-            let _ = w.set_icon(img);
-        }
-    }
-    #[cfg(target_os = "macos")]
-    let _ = app;
+/// clock is the backgroundable clapp: `hide` and the close box demote it instead of
+/// quitting, and the icon is re-asserted when a `.regular` promotion rebuilds the Dock
+/// tile. `quit`/`close` still answers first and exits a beat later, so the CLI's response
+/// frame is on the wire before the process goes away.
+fn policy() -> WindowPolicy {
+    WindowPolicy::backgroundable(ICON_PNG)
 }
 
 pub fn run() {
@@ -46,11 +44,21 @@ pub fn run() {
 
     // Connect the control pipe on Tauri's own async runtime, so the reactive loop
     // (emit + serve + roster) outlives this call and shares the runtime with the tasks.
-    let control = tauri::async_runtime::block_on(clappkit::connect(clappkit::declared_signals()))
-        .unwrap_or_else(|e| {
-            eprintln!("clock: {e}");
-            std::process::exit(1);
-        });
+    //
+    // The shutdown hook is not optional for this app: clappkit's control loop ends the
+    // process on Clatch's `app.shutdown` (and on a closed pipe), which skips every
+    // destructor. clock's whole premise is that only `clock close` stops it, so a
+    // shutdown that arrives from underneath must at least not lose the last mutation.
+    // The hook runs on its own thread, off the runtime, so `blocking_lock` is correct
+    // here; clappkit caps the wait so a held lock cannot wedge the quit.
+    let flush = store.clone();
+    let control = tauri::async_runtime::block_on(clappkit::connect_or_die_with(
+        CLI,
+        Arc::new(move |cause| {
+            eprintln!("clock: {cause} — flushing alarms and timers");
+            flush.blocking_lock().save();
+        }),
+    ));
 
     let app = tauri::Builder::default()
         .manage(store.clone())
@@ -59,13 +67,13 @@ pub fn run() {
             let handle = app.handle().clone();
             // Set the app's own icon before anything shows, so the Dock/taskbar never
             // flashes the generic tile.
-            apply_icon(&handle);
+            clappkit::app::apply_icon(&handle, ICON_PNG);
             // The window is created hidden (tauri.conf.json `"visible": false`) and the
             // policy demoted first, so a background start never flashes a Dock icon;
             // `show_window` promotes us back to .regular the moment there IS a window.
-            enter_background(&handle);
+            clappkit::app::enter_background(&handle);
             if !background {
-                show_window(&handle);
+                clappkit::app::show_window(&handle, Some(ICON_PNG));
             }
             spawn_ipc(store.clone(), control.clone(), handle.clone());
             spawn_scheduler(store.clone(), control.clone(), handle);
@@ -76,8 +84,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
-                enter_background(window.app_handle());
+                clappkit::app::hide_window(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![run_cmd])
@@ -94,84 +101,6 @@ pub fn run() {
     });
 }
 
-// MARK: - Window lifetime (the window is optional and disposable; the scheduler is not)
-
-/// `clock show` / `clock focus` / launch: put the window back on screen — and the app
-/// back in the Dock (macOS `.regular`).
-fn show_window(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-    if let Some(w) = main_window(app) {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
-    // Promoting to .regular builds a FRESH Dock tile, dropping any icon we set earlier
-    // while .accessory — a bare executable then falls back to the generic terminal icon.
-    // Re-assert it now that the tile exists. (chess never demotes, so it needn't do this.)
-    // Once synchronously, once on the next main-loop turn in case the tile isn't ready yet.
-    #[cfg(target_os = "macos")]
-    {
-        clappkit::set_dock_icon(ICON_PNG);
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let _ = app.run_on_main_thread(|| clappkit::set_dock_icon(ICON_PNG));
-        });
-    }
-}
-
-/// `clock hide` / the red button: no window, no Dock tile, still alive and still ticking.
-fn hide_window(app: &AppHandle) {
-    if let Some(w) = main_window(app) {
-        let _ = w.hide();
-    }
-    enter_background(app);
-}
-
-/// The one window from the manifest — falling back to whatever window exists, so a
-/// relabelled config can never leave the app running with nothing on screen.
-fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
-    app.get_webview_window(WINDOW)
-        .or_else(|| app.webview_windows().into_values().next())
-}
-
-/// No Dock tile, no menu bar — the scheduler runs on (Swift's `enterBackground`).
-fn enter_background(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
-}
-
-/// The app-level verbs the CLI drives. They never touch the store — the window is
-/// disposable, the alarms are not. `None` means "not a window verb, pass it to the store".
-fn window_cmd(app: &AppHandle, cmd: &str) -> Option<Value> {
-    match cmd {
-        "ping" => Some(json!({ "ok": true })),
-        "show" | "focus" => {
-            show_window(app);
-            Some(json!({ "ok": true, "message": "window shown" }))
-        }
-        "hide" => {
-            hide_window(app);
-            Some(json!({ "ok": true, "message": "running in the background" }))
-        }
-        // The one command that really stops the alarms. Deferred a beat so the CLI's
-        // response frame is written before the process goes away (Swift defers the
-        // `NSApp.terminate` to the next main-loop turn for the same reason).
-        "quit" | "close" => {
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(150)).await;
-                handle.exit(0);
-            });
-            Some(json!({ "ok": true, "message": "bye" }))
-        }
-        _ => None,
-    }
-}
-
 /// The one command the webview calls: a command envelope `{ "cmd": … }` (human caller),
 /// applied through the shared store; the fresh state rides back as a `state` event too.
 #[tauri::command]
@@ -181,48 +110,39 @@ async fn run_cmd(
     control: State<'_, Control>,
     app: AppHandle,
 ) -> Result<Value, String> {
-    let resp = apply(&store, &control, &req, None).await;
-    let _ = app.emit("state", store.lock().await.snapshot());
-    Ok(resp)
+    let reply = apply(&store, &control, &req, None).await;
+    clappkit::app::push_state(&app, reply.snapshot);
+    Ok(reply.resp)
 }
 
 /// Apply a command through the ONE `Store::handle` and emit any signals it produced.
-async fn apply(store: &SharedStore, control: &Control, req: &Value, caller: Option<String>) -> Value {
-    let (resp, emits) = {
+/// The response and the snapshot are taken in the SAME critical section, so the state
+/// pushed to the window can never describe a different moment than the answer the caller
+/// got — a scheduler tick used to be able to interleave between the two.
+async fn apply(store: &SharedStore, control: &Control, req: &Value, caller: Option<String>) -> Reply {
+    let (resp, emits, snap) = {
         let mut s = store.lock().await;
-        s.set_agents(roster(control));
-        let r = s.handle(req, caller);
-        s.save();
-        r
+        s.set_agents(control.roster());
+        let (resp, emits) = s.handle(req, caller);
+        // Only a mutation writes. The write stays inside the lock deliberately: it is
+        // what orders two concurrent saves, and a read no longer pays for it at all.
+        if s.take_dirty() {
+            s.save();
+        }
+        let snap = s.snapshot();
+        (resp, emits, snap)
     };
-    for e in emits {
-        control.emit(&e.id, e.target, e.payload);
-    }
-    resp
+    control.emit_all(emits);
+    Reply::new(resp, snap)
 }
 
-/// Serve the agent's CLI over clappkit IPC (a separate process), then refresh the window.
+/// Serve the agent's CLI over clappkit IPC (a separate process). clappkit answers the
+/// window verbs itself, extracts the caller's agent id, and pushes the snapshot we return.
 fn spawn_ipc(store: SharedStore, control: Control, app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let handler = move |req: Value| {
-            let store = store.clone();
-            let control = control.clone();
-            let app = app.clone();
-            async move {
-                // `show` / `hide` / `focus` / `close` drive the WINDOW, not the store.
-                let verb = req.get("cmd").and_then(Value::as_str).unwrap_or("");
-                if let Some(resp) = window_cmd(&app, verb) {
-                    return resp;
-                }
-                let caller = req.get("agent").and_then(|v| v.as_str()).map(String::from);
-                let resp = apply(&store, &control, &req, caller).await;
-                let _ = app.emit("state", store.lock().await.snapshot());
-                resp
-            }
-        };
-        if let Err(e) = ipc::serve(&ipc::address(CLI), handler).await {
-            eprintln!("clock: ipc: {e}");
-        }
+    clappkit::app::spawn_ipc(app, CLI, policy(), move |req, caller| {
+        let store = store.clone();
+        let control = control.clone();
+        async move { apply(&store, &control, &req, caller).await }
     });
 }
 
@@ -231,34 +151,32 @@ fn spawn_ipc(store: SharedStore, control: Control, app: AppHandle) {
 fn spawn_scheduler(store: SharedStore, control: Control, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        // `Delay`, not the default `Burst`: after a laptop suspend the runtime clock is
+        // starved, and Burst replays every missed tick back to back — an hour asleep
+        // queued ~3600 immediate iterations, each one a full snapshot and a webview push,
+        // at the moment the machine is trying to wake up. `tick()` reads the wall clock
+        // each time, so skipping the backlog changes nothing about when alarms fire.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
             let (emits, snap) = {
                 let mut s = store.lock().await;
                 // Keep the roster fresh so `wakes` / `owner` names and the GUI's
                 // wake-target picker track Clatch's `app.agents` pushes.
-                s.set_agents(roster(&control));
+                s.set_agents(control.roster());
                 let e = s.tick(chrono::Local::now());
-                if !e.is_empty() {
+                if s.take_dirty() {
                     s.save();
                 }
                 (e, s.snapshot())
             };
-            for e in emits {
+            for e in &emits {
                 // The signal wakes the agent; the `fired` event is the human's cue (the
                 // webview plays the chime, as the Swift app's `onFire` did).
-                let _ = app.emit("fired", serde_json::json!({ "signal": e.id, "payload": e.payload }));
-                control.emit(&e.id, e.target, e.payload);
+                let _ = app.emit("fired", json!({ "signal": e.id, "payload": e.payload }));
             }
-            let _ = app.emit("state", snap);
+            control.emit_all(emits);
+            clappkit::app::push_state(&app, snap);
         }
     });
-}
-
-fn roster(control: &Control) -> Vec<AgentRow> {
-    control
-        .agents()
-        .into_iter()
-        .map(|a| AgentRow { id: a.id, name: a.name, backend: a.backend, model: a.model })
-        .collect()
 }

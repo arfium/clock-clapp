@@ -1,14 +1,24 @@
 .DS_Store
-native/.build/
-native/build/
-dist/
 *.app/
 *.log
 *.clapp
 *.clapp.sha256
 
-# Tauri / web build artifacts (tauri-test branch)
+# The Swift original (native/) is kept as the behavioural reference, not as the build.
+native/.build/
+native/build/
+
+# Personal Claude Code settings (the shared .claude/settings.json IS committed)
+.claude/settings.local.json
+
+# Web + Rust build output
 node_modules/
-/pkg/
+dist/
 src-tauri/target/
 src-tauri/gen/
+
+# The assembled Clatch depot (scripts/package.sh) — reproducible, never committed
+/pkg/
+
+# Scratch output from the macOS helper .app scripts
+/build/

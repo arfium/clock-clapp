@@ -16,6 +16,7 @@ selectable (in the GUI, or with `--to`): when it fires the chosen agent(s) get a
 usage:
   clock now                          print the current time
   clock list                         list all alarms and timers (→ shows who each wakes)
+  clock state                        alias for `list`
   clock alarm <time> "<label>"       set an alarm at a wall-clock time
       --note "<text>"                what to do when it fires — this becomes YOUR
                                      PROMPT for the turn the alarm wakes
@@ -26,9 +27,13 @@ usage:
   clock edit <id> [<time>]           change an alarm; omitted flags keep their value
       --time · --label · --note · --repeat · --quiet · --wake · --to
   clock timer <dur> "<label>"        start a countdown (fires timer.done when it ends)
+  clock set <when> "<label>"         shorthand: a clock time makes an alarm, a duration
+                                     a timer (takes the same flags as each)
   clock cancel <id>                  remove an alarm (aN) or timer (tN)
   clock toggle <id>                  enable / disable an alarm
-  clock pause <id> / resume <id>     pause / resume a timer
+  clock pause <id>                   pause a running timer
+  clock resume <id>                  resume a paused timer
+  clock focus                        open the window (same as `show`)
   clock show                         open the window (same as `focus`)
   clock hide                         send it back to the background
   clock close                        quit the app — this is what stops the alarms
@@ -37,8 +42,7 @@ clock keeps time with or without a window. `clock app --background` starts it wi
 window and no Dock icon; closing the window just backgrounds it again. Set an alarm
 without taking over the screen, and `clock show` only when you want to be seen.
 
-<time>  7:30 · 07:30 · 7:30am · 19:30        <dur>  10m · 1h30m · 90s · 45s
-`clock set <when> …` is a shorthand: a clock time makes an alarm, a duration a timer.
+<time>  7:30 · 07:30 · 7:30am · 19:30        <dur>  10m · 1h30m · 90s · 45s (max 365d)
 
 The note is the whole point of a wake alarm: when it fires you get a fresh turn with
 no memory of setting it, and the note is the only context that survives. Write the

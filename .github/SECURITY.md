@@ -2,7 +2,7 @@
 
 A Clatch app built from this template opens a user-private Unix socket and speaks
 the Clatch control pipe with real permissions on the user's machine. The template's
-transport (`IPC.swift`, `ControlPipe.swift`) is the part where security matters.
+transport (`clappkit::ipc`, `clappkit::control`) is the part where security matters.
 
 ## Reporting a vulnerability
 
@@ -15,9 +15,9 @@ a fix before publishing details.
 ## Scope
 
 - The GUI↔CLI socket: directory/socket permissions (`0700`/`0600`), and the
-  request-handling path in `IPC.swift`.
-- The control-pipe handshake and framing in `ControlPipe.swift`, and the
-  `clatch_init` bootstrap in `Bootstrap.swift`.
+  request-handling path in `clappkit::ipc`.
+- The control-pipe handshake and framing in `clappkit::control`, and the
+  `clatch_init` bootstrap behind `clappkit::bootstrap`.
 - The manifest (`clatch.json`) and packaging (`scripts/package.sh`).
 
 Out of scope: the Clatch launcher itself (report to

@@ -2,11 +2,16 @@
 // shared Store; `state` events push the fresh snapshot whenever anything changes
 // (a GUI action, the agent's CLI, or the scheduler firing).
 //
+// Both channels are clappkit's (`@clappkit`, aliased in vite.config.ts) — every clapp
+// speaks the same two, and they were written out once per app. What stays here is what
+// is genuinely clock's: the DTO shapes, `normalize`, and the `fired` chime event.
+//
 // The shapes below mirror `Store::alarm_dto` / `timer_dto` exactly. Text the CLI also
 // prints (`detail`, `wakes`, `wakesShort`, `repeat`) is computed ONCE in Rust and read
 // here, so the window and the terminal can never word the same alarm differently.
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export { cmd, onState, useSnapshot, agentTint } from "@clappkit";
 
 export type Alarm = {
   id: string;
@@ -42,34 +47,42 @@ export type Timer = {
   ownerId: string | null;
 };
 
-/// One bound agent, mirrored from Clatch's `app.agents` roster push.
-export type AgentRow = { id: string; name: string; backend?: string; model?: string | null };
+/// One bound agent, mirrored from Clatch's `app.agents` roster push. A blank backend or
+/// model arrives as "" / null respectively — Rust normalises it (`clappkit::AgentRow`).
+export type AgentRow = {
+  id: string;
+  name: string;
+  backend?: string;
+  model?: string | null;
+  avatar?: string | null;
+};
 
-export type ClockState = { alarms: Alarm[]; timers: Timer[]; agents: AgentRow[] };
+/// A command envelope: `{ cmd: "alarm", when: "7:30", … }` — the one shape both the
+/// window and the agent's CLI send.
+export type Req = Record<string, unknown>;
+
+export type ClockState = {
+  /// `false` on a refused command; `useSnapshot` drops those and keeps the last good state.
+  ok?: boolean;
+  /// Monotonic, stamped by `clappkit::snapshot` — how an invoke reply that resolves after
+  /// a newer pushed event is recognised as stale and discarded.
+  rev?: number;
+  alarms: Alarm[];
+  timers: Timer[];
+  agents: AgentRow[];
+};
 
 export const EMPTY: ClockState = { alarms: [], timers: [], agents: [] };
 
-/// A refused command answers `{ ok: false, error }` — keep the last good state.
-export function normalize(v: unknown): ClockState | null {
-  if (!v || typeof v !== "object") return null;
-  const o = v as Record<string, unknown>;
-  if (o.ok === false) return null;
+/// Fill in anything a snapshot left out, so the views never index into `undefined`.
+/// (`ok: false` is already filtered upstream by `useSnapshot`.)
+export function normalize(v: ClockState): ClockState {
   return {
-    alarms: (o.alarms as Alarm[]) ?? [],
-    timers: (o.timers as Timer[]) ?? [],
-    agents: (o.agents as AgentRow[]) ?? [],
+    ...v,
+    alarms: v.alarms ?? [],
+    timers: v.timers ?? [],
+    agents: v.agents ?? [],
   };
-}
-
-export async function cmd(req: unknown): Promise<ClockState | null> {
-  return normalize(await invoke("run_cmd", { req }));
-}
-
-export function onState(cb: (s: ClockState) => void): Promise<UnlistenFn> {
-  return listen<unknown>("state", (e) => {
-    const s = normalize(e.payload);
-    if (s) cb(s);
-  });
 }
 
 /// One alarm or timer came due. The scheduler emits this beside the signal it sends

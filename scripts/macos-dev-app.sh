@@ -3,16 +3,22 @@
 # does NOT go through Clatch). Product launches go through `clatch run com.arfium.clock`.
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-APP="${1:-$ROOT/dist/ClockDev.app}"
-CONTENTS="$APP/Contents"; MACOS="$CONTENTS/MacOS"; RESOURCES="$CONTENTS/Resources"
-ICONSET="$ROOT/dist/clock-dev.iconset"
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
-swift build -c release --package-path "$ROOT/native" >/dev/null
+CLI="$(manifest connector.cli)"
+VERSION="$(manifest version)"
+APP="${1:-$ROOT/build/ClockDev.app}"
+CONTENTS="$APP/Contents"; MACOS="$CONTENTS/MacOS"; RESOURCES="$CONTENTS/Resources"
+ICONSET="$ROOT/build/clock-dev.iconset"
+
+# The Tauri build, never a bare `cargo build --release` — see tauri_build() in lib.sh:
+# without the CLI's custom-protocol feature the binary has no embedded frontend and
+# opens a white window.
+tauri_build
 
 rm -rf "$APP" "$ICONSET"
 mkdir -p "$MACOS" "$RESOURCES" "$ICONSET"
-cp "$ROOT/native/.build/release/clock" "$MACOS/clock-bin"
+cp "$ROOT/src-tauri/target/release/$CLI" "$MACOS/clock-bin"
 cat >"$MACOS/clock" <<'EOF'
 #!/bin/sh
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -33,12 +39,14 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
   <key>CFBundleIdentifier</key><string>com.arfium.clock.dev</string>
   <key>CFBundleName</key><string>Clock Dev</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
 </plist>
 EOF
+
+sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/" "$CONTENTS/Info.plist"
 
 if [ -f "$ROOT/assets/icon.png" ]; then
   for spec in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" \

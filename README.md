@@ -8,7 +8,7 @@ a scheduler is just an app that fires signals.**
   to re-check the build."* When it comes due, clock fires a **`run` signal** that
   starts an agent turn — the agent schedules its own future.
 - The **human** sets alarms and timers in the GUI. Both edit **one shared state**
-  (`ClockStore`), so an alarm the agent sets shows up in your window instantly, and
+  (`Store`), so an alarm the agent sets shows up in your window instantly, and
   one you set reaches the agent as an `alarm.set` signal.
 
 clock is a **clapp** on the frozen [Clapp Protocol](docs/protocol.md) — same
@@ -22,12 +22,12 @@ From the Clatch daemon spec:
 > a scheduler is any always-on app firing signals; the platform ships no
 > always-on hook today.
 
-So there is **no cron in Clatch**, and (as of Clapp v1) **no `autostart` either** —
+So there is **no cron in Clatch**, and **no `autostart` either** —
 the platform provides no always-on hook at all. A scheduler is just an app that,
 *while it runs*, keeps its own timer and emits a signal when something is due. clock
-is the smallest honest demonstration of that: an internal 1-second `Timer`, a
-durable store, and one line — `emitSignal("alarm.fired", …)` — that turns a due
-alarm into an agent turn (the signal's `run` type is fixed in the manifest).
+is the smallest honest demonstration of that: an internal 1-second tick, a durable
+store, and one line — `Emit { id: "alarm.fired", … }` — that turns a due alarm into an
+agent turn (the signal's `run` type is fixed in the manifest).
 
 ## The agent loop it enables
 
@@ -49,22 +49,34 @@ alarm*. That's what `--note` is: not a memo, but the prompt for the turn the ala
 starts. The human writes notes too — in the GUI's Note field — which is how you hand
 an agent work at a future time without being there when it happens.
 
-## Quickstart (macOS)
+## Quickstart
+
+Prerequisites: Node 20+, a Rust toolchain, and the platform's Tauri v2 prerequisites
+(Xcode CLT on macOS; WebKitGTK on Linux; nothing extra on Windows).
 
 ```sh
-npm run build
+npm ci
+npm run build          # → src-tauri/target/release/clock (the frontend EMBEDDED)
+CLI=src-tauri/target/release/clock
 
 # Try it without Clatch (dev hatch): a window with a live face, alarms, and timers
-CLATCH_STANDALONE=1 bin/clock app &
-bin/clock timer 30s "say hello"        # a countdown (wakes the agent when it ends)
-bin/clock alarm 14:30 "lunch"          # a wall-clock alarm
-bin/clock alarm 7:30 "standup" --repeat weekdays \
+CLATCH_STANDALONE=1 $CLI app &
+$CLI timer 30s "say hello"        # a countdown (wakes the agent when it ends)
+$CLI alarm 14:30 "lunch"          # a wall-clock alarm
+$CLI alarm 7:30 "standup" --repeat weekdays \
   --note "post yesterday's diff summary to #eng"   # ← the agent's prompt when it fires
-bin/clock edit a1 9:15 --note "…"      # change one; omitted flags keep their value
-bin/clock list                         # see everything, with notes and who set it
-bin/clock cancel t1                    # cancel by id (aN alarm · tN timer)
-bin/clock --help                       # the agent's manual
+$CLI edit a1 9:15 --note "…"      # change one; omitted flags keep their value
+$CLI list                         # see everything, with notes and who set it
+$CLI cancel t1                    # cancel by id (aN alarm · tN timer)
+$CLI --help                       # the agent's manual
+$CLI close                        # the one thing that stops the alarms
 ```
+
+Build it with `npm run build`, not a bare `cargo build --release`: Tauri's
+`custom-protocol` feature is turned on by the Tauri CLI, and without it the binary
+points its webview at the dev server instead of the frontend embedded in the
+executable — a shipped app that opens a white window. `scripts/package.sh` asserts the
+bundle really is embedded, so that cannot ship by accident.
 
 ### Install it for real (end users)
 
@@ -72,7 +84,7 @@ No source checkout — install from a published GitHub release:
 
 ```sh
 clatch install github:arfium/clock-clapp          # latest release
-clatch install github:arfium/clock-clapp@v0.1.0   # a specific version
+clatch install github:arfium/clock-clapp@v0.2.0   # a specific version
 ```
 
 (Or download `com.arfium.clock-macos-arm64.clapp` from the repo's **Releases** and
@@ -84,12 +96,13 @@ clatch agent grant <agent-name> app:com.arfium.clock
 clatch agent send <agent-name> "set a timer 2 minutes from now to check on me"
 ```
 
-(Dev-from-source path: `clatch install dist` after `npm run package`.)
+(Dev-from-source path: `clatch install pkg` after `npm run package`. The depot is
+`pkg/` — `dist/` belongs to Vite.)
 
 ## Keeping it running (there is no autostart)
 
-An alarm is only useful if the app is running when it comes due — and Clapp v1
-**dropped `autostart`**: the platform ships **no always-on hook**. So clock fires
+An alarm is only useful if the app is running when it comes due — and the Clapp
+Protocol has **no `autostart`**: the platform ships **no always-on hook**. So clock fires
 only *while the process is alive*. If a scheduler needs to survive reboots, that is
 the app's own concern today, not a platform mechanic.
 
@@ -108,9 +121,11 @@ This is what lets an agent set an alarm without taking over the screen: it sched
 its work, the app keeps time invisibly, and the window only appears if someone asks
 for it.
 
-clock persists its state to `~/.clock/clock.json` and, on the next startup, **fires
-anything already overdue** (its catch-up policy) — because the platform guarantees
-nothing about missed schedules; that's the app's job.
+clock persists its state to `$CLATCH_DATA_DIR/clock.json` — the directory Clatch gives
+the instance, so a backup captures it and `clatch purge` cleans it. Outside Clatch it
+falls back to `~/.clock/clock.json` (`%LOCALAPPDATA%\clock\clock.json` on Windows). On
+the next startup it **fires anything already overdue** (its catch-up policy) — because
+the platform guarantees nothing about missed schedules; that's the app's job.
 
 ## Why isn't my alarm waking the agent?
 
@@ -140,9 +155,9 @@ This is the launcher spec's own example of targeting made real: *"a scheduler re
 the `CLATCH_AGENT_ID` of whoever set an alarm and, when it fires, targets exactly that
 agent."*
 
-## Signals (typed at declaration — Clapp v1)
+## Signals (typed at declaration)
 
-A signal's type is fixed in the manifest, not chosen per emission, so wake vs notify
+A signal's type is fixed in `clatch.json`, not chosen per emission, so wake vs notify
 is two **names**, not a mode:
 
 | signal | type | when | target |
@@ -159,18 +174,44 @@ The alarm payload carries `note` when one is set — the instruction the woken a
 acts on. Both `alarm.fired` and `alarm.quiet` include it; the **signal name** is what
 decides whether to act on it now or merely absorb it.
 
+## How it is built
+
+clock is **Rust + [Tauri v2](https://tauri.app)** on the shared **`clappkit`** crate:
+one binary with two roles. `clock app` is the GUI process Clatch launches — the window,
+the 1-second scheduler, the control pipe, and the IPC server. `clock <verb>` is the
+agent's CLI client, which talks to that process over the app's own private socket
+(a Windows named pipe there). The same binary, dispatched on `argv[1]`.
+
+It began as a macOS SwiftUI app, and **that original is still in the repo** under
+[`native/`](native/Sources/clock/) — not as the build, but as the behavioural spec. When
+a question comes up about *what clock should do*, `ClockStore.swift` is the answer;
+`src-tauri/src/store.rs` is a deliberate 1:1 port of it, down to the on-disk format, so
+an existing `~/.clock/clock.json` written by the Swift app still loads.
+
+```
+src-tauri/src/store.rs   the whole app: alarms, timers, the scheduler tick, and the ONE
+                         `handle` both surfaces call. Pure and sync — it RETURNS the
+                         signals to send rather than sending them. Start here.
+src-tauri/src/app.rs     the Tauri process: window lifetime, the scheduler task, the
+                         GUI↔CLI relay. Thin — the generic parts are clappkit::app.
+src-tauri/src/cli.rs     the agent's CLI. `HELP` is the agent's only manual.
+src/                     the React window: the analog face, the alarm sheet, the timer
+                         ring. Its channels come from `@clappkit`.
+clatch.json              the manifest: id, launch, the declared verbs and signals.
+```
+
+The plumbing is nobody's business but clappkit's — the control pipe (`app.toAgent`,
+`app.register {instanceToken}`, fail-fast framing), the private IPC transport, the
+data-dir resolver, the atomic store writer, the window verbs, and the roster
+projection. All of it speaks the frozen [Clapp Protocol](docs/protocol.md).
+
 ## Files worth reading
 
+- [`src-tauri/src/store.rs`](src-tauri/src/store.rs) — the shared state + scheduler +
+  the `tick()` that turns a due alarm into a signal. **This is the whole idea.**
 - [`native/Sources/clock/ClockStore.swift`](native/Sources/clock/ClockStore.swift) —
-  the shared state + scheduler + the `fire()` that emits the signal. **This is the
-  whole idea.**
-- [`native/Sources/clock/main.swift`](native/Sources/clock/main.swift) — the CLI
-  verbs and the socket handler.
-- [`native/Sources/clock/ClockRoot.swift`](native/Sources/clock/ClockRoot.swift) —
-  the human's GUI: the tabbed Clock / Alarms / Timer window.
-- [`native/Sources/clock/ClockFace.swift`](native/Sources/clock/ClockFace.swift) —
-  the live analog face (a sweeping second hand with zero drift).
-- [`AGENT.md`](AGENT.md) — how an agent operates clock.
-- The transport (`ControlPipe.swift`, `IPC.swift`, `Bootstrap.swift`) is the generic
-  clapp implementation, speaking the frozen [Clapp Protocol](docs/protocol.md)
-  (`app.toAgent`, `app.register {instanceToken}`, fail-fast framing).
+  the Swift original the above is a port of; the behavioural reference.
+- [`AGENTS.md`](AGENTS.md) — how an agent operates clock.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the clapp model in general.
+- [`docs/ICONS.md`](docs/ICONS.md) · [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md) — the house
+  standards this app is held to.

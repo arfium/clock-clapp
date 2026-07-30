@@ -1,5 +1,24 @@
 # Architecture
 
+> ### Reading this in clock-clapp
+>
+> This is the **shared house document**, copied verbatim from `template-clapp` so it can
+> be read from inside this repo. The template is still Swift/SwiftUI; clock is **Rust +
+> Tauri v2 on the shared `clappkit` crate**. The model below is unchanged — only the file
+> names are:
+>
+> | the text says | clock's actual | |
+> |---|---|---|
+> | `AppInfo.swift` | `clatch.json` | identity is read from the manifest, never duplicated |
+> | `IPC.swift` | `clappkit::ipc` | the GUI↔CLI channel; not app-owned code any more |
+> | `ControlPipe.swift` | `clappkit::control` | the Clatch control pipe |
+> | `Bootstrap.swift` | `clappkit::bootstrap` | run-only-under-Clatch |
+> | `AppState.swift` | `src-tauri/src/store.rs` | the shared state + the one `handle` |
+> | `swift build` | `npm run build` | through the Tauri CLI — see the README |
+>
+> `native/` holds the SwiftUI original as the **behavioural reference**, not the build.
+> Fix this document in `template-clapp`; never fork it here.
+
 How a clapp-style app is put together, and why. This is the mental model; the
 normative details live in the [Clatch repo](https://github.com/arfium/clatch)'s `reference/` specs.
 

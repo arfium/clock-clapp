@@ -4,9 +4,21 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
+    "build": "scripts/build.sh",
+    "build:web": "vite build",
+    "check": "node scripts/check-manifest.mjs",
+    "cli": "src-tauri/target/release/clock",
     "dev": "vite",
-    "build": "vite build",
-    "tauri": "tauri"
+    "dev-app": "scripts/macos-dev-app.sh",
+    "icon": "scripts/render-icon.sh",
+    "pack": "scripts/pack.sh",
+    "package": "scripts/package.sh",
+    "shortcut:macos": "scripts/macos-shortcut.sh",
+    "tauri": "tauri",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "typecheck": "tsc --noEmit",
+    "validate": "scripts/validate.sh",
+    "verify": "scripts/verify.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

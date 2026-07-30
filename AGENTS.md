@@ -16,24 +16,26 @@ Verbs:
 ```sh
 clock now                              # current time
 clock list                             # every alarm & timer: id, when, label, note, who set it
+clock state                            # alias for `list`
 clock alarm <time> "<label>"           # wall-clock alarm; wakes you when it fires
 clock alarm <time> "<label>" --note "<text>"   # ← the prompt you get when it wakes you
 clock alarm <time> "<label>" --repeat <days>   # daily | weekdays | weekends | mon,wed,fri
+clock alarm <time> "<label>" --to <agents>     # who to wake: everyone | alice | alice,bob
 clock alarm <time> "<label>" --quiet           # fire as context (do NOT wake you)
 clock edit <id> [<time>]               # change one; omitted flags keep their value
-    --time · --label · --note · --repeat · --quiet · --wake
+    --time · --label · --note · --repeat · --quiet · --wake · --to
 clock timer <dur> "<label>"            # countdown; wakes you with timer.done when it ends
+clock set <when> "<label>"             # shorthand: a clock time → alarm, a duration → timer
 clock cancel <id>                      # remove an alarm (aN) or timer (tN)
 clock toggle <id>                      # enable / disable an alarm
 clock pause <id> / clock resume <id>   # pause / resume a timer
-clock show / clock hide                # open the window / put it back in the background
+clock focus / clock show               # open the window (the two are the same verb)
+clock hide                             # put it back in the background
 clock close                            # quit — the only thing that stops the alarms
 ```
 
 `<time>`: `7:30` · `07:30` · `7:30am` · `19:30`  (a wall-clock time — today, else tomorrow)
-`<dur>`:  `45s` · `10m` · `1h30m` · `90s`  (a countdown from now)
-
-`clock set <when> …` is a shorthand: a clock time makes an alarm, a duration a timer.
+`<dur>`:  `45s` · `10m` · `1h30m` · `90s`  (a countdown from now; at most `365d`)
 
 ## The note is your prompt
 
@@ -62,9 +64,12 @@ How to use it well:
   that takes minutes. `clock timer 10m "re-check CI on PR #42"`, finish your turn,
   and act when it wakes you. Use `alarm` for a wall-clock moment (`9:00 standup`),
   `timer` for "N minutes from now".
-- **The alarms and timers you set wake only you.** clock records your `CLATCH_AGENT`
-  and, when one fires, targets you specifically — other agents sharing this clock are
-  not disturbed. So schedule freely; it's your own timer, not a shared bell.
+- **By default the alarms and timers you set wake only you.** clock records your
+  `CLATCH_AGENT_ID` and, when one fires, targets you specifically — other agents
+  sharing this clock are not disturbed. So schedule freely; it's your own timer, not a
+  shared bell. When you *do* mean to reach someone else, say so: `--to alice`,
+  `--to alice,bob`, or `--to everyone` (a name is resolved to that agent's id, so a
+  rename never breaks the alarm). The human picks the same thing in the GUI.
 - **Put the instruction in `--note`, not the label.** The label is the short name on
   the row ("standup"); the note is what you actually have to do. See above.
 - **Edit rather than delete-and-recreate.** `clock edit a1 --note "…"` keeps the
