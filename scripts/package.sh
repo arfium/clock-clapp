@@ -64,9 +64,20 @@ if [ -f "$ROOT/THIRD_PARTY_NOTICES.md" ]; then
   cp "$ROOT/THIRD_PARTY_NOTICES.md" "$DIST/THIRD_PARTY_NOTICES.md"
 fi
 
-# The manifest. On Windows the DEPOT copy's connector.cliBin is rewritten to the .exe
-# name — see install_manifest() in lib.sh for why, and why the repo copy must not be.
-if [ -n "$EXE" ]; then
+# On macOS the binary moves into a real .app bundle so the Dock has an icon and a name to
+# read (see macos_app_bundle() in lib.sh — a bare executable has neither).
+INNER=""
+if [ "$OS" = macos ]; then
+  NAME="$(manifest name)" || NAME="$CLI"
+  INNER="$(macos_app_bundle "$DIST" "$CLI" "$NAME" "$ID" "$VERSION" "$ROOT/$ICON")"
+fi
+
+# The manifest. The DEPOT copy's connector.cliBin is rewritten per host — to the .exe name
+# on Windows, into the bundle on macOS — see install_manifest() in lib.sh for why, and why
+# the repo copy must stay the plain POSIX form.
+if [ -n "$INNER" ]; then
+  install_manifest "$ROOT/clatch.json" "$DIST/clatch.json" "$INNER" macos "$INNER"
+elif [ -n "$EXE" ]; then
   install_manifest "$ROOT/clatch.json" "$DIST/clatch.json" "bin/$CLI$EXE"
 else
   cp "$ROOT/clatch.json" "$DIST/clatch.json"
@@ -77,7 +88,7 @@ app_extras
 # The depot must contain everything the manifest promises, or the failure surfaces on
 # a user's machine at `clatch install` instead of here. Same pair Clatch checks.
 step "self-check"
-[ -x "$DIST/bin/$CLI$EXE" ] || fail "$DEPOT/bin/$CLI$EXE is missing or not executable"
+[ -x "$DIST/${INNER:-bin/$CLI$EXE}" ] || fail "$DEPOT/${INNER:-bin/$CLI$EXE} is missing or not executable"
 for declared in "$(manifest_path "$DIST/clatch.json" cliBin "$OS")" \
                 "$(manifest_path "$DIST/clatch.json" launch "$OS")" \
                 "$(manifest_path "$DIST/clatch.json" icon "$OS")"; do

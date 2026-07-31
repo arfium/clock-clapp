@@ -63,14 +63,17 @@ manifest_path() { # <manifest> <cliBin|launch|icon> <os>
 # repo manifest verbatim cannot be installed at all. A `.clapp` is already per-OS-arch
 # (<id>-<os>-<arch>.clapp), so rewriting the DEPOT copy is the honest fix. The repo
 # copy stays POSIX — do not "fix" it there.
-install_manifest() { # <src> <dst> <cliBin>
+install_manifest() { # <src> <dst> <cliBin> [launch-os] [launch-path]
   node -e '
     const fs = require("fs");
-    const [src, dst, cliBin] = process.argv.slice(1);
+    const [src, dst, cliBin, os, launch] = process.argv.slice(1);
     const m = JSON.parse(fs.readFileSync(src, "utf8"));
     if (m.connector) m.connector.cliBin = cliBin;
+    // The macOS depot puts the binary inside a .app bundle, so BOTH the launch command
+    // and the CLI path move with it — they are two roles of the one executable.
+    if (os && launch && m.launch) m.launch[os] = launch;
     fs.writeFileSync(dst, JSON.stringify(m, null, 2) + "\n");
-  ' "$1" "$2" "$3"
+  ' "$1" "$2" "$3" "${4:-}" "${5:-}"
 }
 
 # ── the host ────────────────────────────────────────────────────────────────────
@@ -152,4 +155,63 @@ assert_frontend_embedded() { # <binary>
       That is what a binary built WITHOUT Tauri's custom-protocol feature looks like —
       a plain \`cargo build --release\`. It would point the webview at devUrl and open
       a white window (or a stale dev page). Build with scripts/package.sh."
+}
+
+# ── macOS: wrap the ONE binary in a real .app bundle ────────────────────────────
+# A bare Mach-O has NO icon identity. macOS gives it the generic terminal tile, and the
+# process can only paint over that at runtime (NSApp.applicationIconImage) — so the
+# generic shows through every time AppKit builds or releases the tile: at launch, when
+# the activation policy changes (clock's background mode), and while quitting. A real
+# bundle puts the icon and the name in Info.plist where the Dock reads them, so there is
+# no generic phase to see.
+#
+# The binary is MOVED into the bundle, not copied: a depot ships real files only (the
+# packer skips symlinks), so `launch.macos` and `connector.cliBin` both point at the ONE
+# executable inside it — still one binary, two roles.
+macos_app_bundle() { # <dist> <cli> <display-name> <id> <version> <src-icon-png> -> prints inner exec path
+  _d=$1; _cli=$2; _name=$3; _id=$4; _ver=$5; _icon=$6
+  _app="$_d/bin/$_name.app"
+  mkdir -p "$_app/Contents/MacOS" "$_app/Contents/Resources"
+  mv "$_d/bin/$_cli" "$_app/Contents/MacOS/$_cli"
+  chmod +x "$_app/Contents/MacOS/$_cli"
+
+  # The .icns carries the SAME inset the running app applies, so the icon does not change
+  # size the moment the process sets its own (clappkit::dock_icon — one implementation).
+  # Built OUTSIDE the depot: a stray work file under $_d would be packed into the .clapp.
+  # The directory must be named `<something>.iconset` — iconutil rejects any other name.
+  _work="${TMPDIR:-/tmp}/clapp-icon-$$"; rm -rf "$_work"; mkdir -p "$_work"
+  _pad="$_work/dock.png"
+  if "$ROOT/../clappkit/target/release/dock-icon" "$_icon" "$_pad" 2>/dev/null \
+     || cargo run --quiet --release --manifest-path "$ROOT/../clappkit/Cargo.toml" \
+          --bin dock-icon -- "$_icon" "$_pad" 2>/dev/null; then :; else cp "$_icon" "$_pad"; fi
+  _set="$_work/$_cli.iconset"; mkdir -p "$_set"
+  for _s in 16 32 128 256 512; do
+    sips -z "$_s" "$_s" "$_pad" --out "$_set/icon_${_s}x${_s}.png" >/dev/null 2>&1
+    _2=$((_s * 2))
+    sips -z "$_2" "$_2" "$_pad" --out "$_set/icon_${_s}x${_s}@2x.png" >/dev/null 2>&1
+  done
+  iconutil -c icns "$_set" -o "$_app/Contents/Resources/$_cli.icns" >/dev/null 2>&1 \
+    || fail "iconutil could not build $_cli.icns — the bundle would ship with the generic
+      terminal icon, which is the whole reason this bundle exists"
+  rm -rf "$_work"
+
+  cat > "$_app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>$_cli</string>
+  <key>CFBundleIdentifier</key><string>$_id</string>
+  <key>CFBundleName</key><string>$_name</string>
+  <key>CFBundleDisplayName</key><string>$_name</string>
+  <key>CFBundleIconFile</key><string>$_cli</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>$_ver</string>
+  <key>CFBundleVersion</key><string>$_ver</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+  plutil -lint "$_app/Contents/Info.plist" >/dev/null 2>&1 \
+    || fail "the generated Info.plist is not valid"
+  printf 'bin/%s.app/Contents/MacOS/%s\n' "$_name" "$_cli"
 }

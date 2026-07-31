@@ -68,11 +68,19 @@ pub fn run() {
             // Set the app's own icon before anything shows, so the Dock/taskbar never
             // flashes the generic tile.
             clappkit::app::apply_icon(&handle, ICON_PNG);
-            // The window is created hidden (tauri.conf.json `"visible": false`) and the
-            // policy demoted first, so a background start never flashes a Dock icon;
-            // `show_window` promotes us back to .regular the moment there IS a window.
-            clappkit::app::enter_background(&handle);
-            if !background {
+            // The window is created hidden (tauri.conf.json `"visible": false`), so the
+            // policy is set ONCE, to whichever state we are actually starting in.
+            //
+            // It used to demote to .accessory unconditionally and then promote straight
+            // back for a normal launch. That round trip is what left clock — alone among
+            // the clapps — showing the generic terminal tile: promoting to .regular builds
+            // a BRAND NEW Dock tile, and a bare executable's new tile is the generic one.
+            // Re-asserting the icon afterwards only races that construction. Not demoting
+            // in the first place is the fix, and it makes a normal clock launch behave
+            // exactly like chess, whose icon was never wrong.
+            if background {
+                clappkit::app::enter_background(&handle);
+            } else {
                 clappkit::app::show_window(&handle, Some(ICON_PNG));
             }
             spawn_ipc(store.clone(), control.clone(), handle.clone());
