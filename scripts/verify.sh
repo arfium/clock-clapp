@@ -20,12 +20,19 @@ app_checks() { :; }
 # ── everything below this line is byte-identical in every clapp ──────────────────
 
 CLI="$(manifest connector.cli)" || fail "clatch.json: connector.cli is missing"
+# For `app_checks` to use. The round-trip below does NOT need it: the depot manifest
+# already spells the host's binary, .exe and all.
 EXE="$(exe_suffix)"
 
 # 1. build + assemble. package.sh prints the depot path on stdout and narrates on
 #    stderr, so this both runs the build and tells us where the artefact landed.
 DIST="$("$ROOT/scripts/package.sh")"
-BIN="$DIST/bin/$CLI$EXE"
+# The depot's OWN manifest, not this repo's: package.sh rewrites connector.cliBin per
+# host — on macOS the binary moves into a real .app bundle, so `bin/<cli>` is not where
+# it lands. Hardcoding that path made this gate silently unrunnable for every bundled
+# app: the probe could never reach a binary that was not there, and the failure read as
+# "the app never came up".
+BIN="$DIST/$(manifest_path "$DIST/clatch.json" cliBin "$(host_os)")"
 
 app_checks
 
