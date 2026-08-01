@@ -1,0 +1,3 @@
+[submodule "clappkit"]
+	path = clappkit
+	url = git@github.com:arfium/clappkit.git

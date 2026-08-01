@@ -7,7 +7,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // The shared front-end half of clappkit: plain .ts resolved by this alias, so nothing
 // is added to package.json and `@tauri-apps/api` / `react` still come from OUR
 // node_modules. `server.fs.allow` is what lets the dev server read it from outside root.
-const clappkit = path.resolve(here, "../clappkit/web");
+const clappkit = path.resolve(here, "clappkit/web");
 // …and because that file sits OUTSIDE this project, Node's own resolution would look for
 // `react` / `@tauri-apps/api` in `clapps/node_modules` and find nothing. Pin both to OUR
 // copies, which is also what guarantees one React instance (two would break hooks).
