@@ -111,23 +111,13 @@ find_clatch() {
 }
 
 # ── the Tauri build ─────────────────────────────────────────────────────────────
-# THE ONE CORRECT WAY TO BUILD A TAURI CLAPP. Read this before "simplifying" it to
-# `cargo build --release`:
+# NOT `cargo build --release`. The Tauri CLI turns on the `custom-protocol` feature;
+# cargo does not, so a plain cargo release binary still points the webview at devUrl and
+# the packaged app opens white — or shows another app's UI if that port is busy.
+# package.sh asserts the hashed bundle name appears inside the binary, which makes
+# shipping that impossible.
 #
-#   Tauri's `custom-protocol` cargo feature is turned on by the Tauri CLI, not by
-#   cargo. Build with plain cargo and the release binary is still a DEV binary: it
-#   points the webview at `build.devUrl` (http://localhost:142x) instead of serving
-#   the frontend embedded in the executable. The packaged app then comes up as a
-#   white window — or, if a dev server happens to be running on that port, as the
-#   WRONG app's UI. That mistake has already cost this project a debugging session;
-#   the assertion in package.sh (the hashed bundle name must appear inside the
-#   binary) is the guard that makes it impossible to ship again.
-#
-# `--no-bundle` skips the .app/.dmg/.msi/.deb step: a clapp depot is bin/ + assets/
-# + clatch.json, not an OS installer. (bundle.active is already false in
-# tauri.conf.json; passing the flag makes the intent explicit and survives that
-# being flipped for some other purpose.)
-#
+# `--no-bundle`: a depot is bin/ + assets/ + clatch.json, not an OS installer.
 # CLAPP_FRONTEND_ONLY is the re-entrancy guard for `npm run build` — see build.sh.
 tauri_build() {
   ( cd "$ROOT" && CLAPP_FRONTEND_ONLY=1 npm run --silent tauri -- build --no-bundle >&2 )
@@ -158,16 +148,13 @@ assert_frontend_embedded() { # <binary>
 }
 
 # ── macOS: wrap the ONE binary in a real .app bundle ────────────────────────────
-# A bare Mach-O has NO icon identity. macOS gives it the generic terminal tile, and the
-# process can only paint over that at runtime (NSApp.applicationIconImage) — so the
-# generic shows through every time AppKit builds or releases the tile: at launch, when
-# the activation policy changes (clock's background mode), and while quitting. A real
-# bundle puts the icon and the name in Info.plist where the Dock reads them, so there is
-# no generic phase to see.
+# A bare Mach-O has no icon identity: macOS shows the generic terminal tile, and painting
+# over it at runtime still lets the generic through every time AppKit rebuilds the tile —
+# at launch, on an activation-policy change, while quitting. Info.plist is where the Dock
+# actually reads it, so there is no generic phase at all.
 #
-# The binary is MOVED into the bundle, not copied: a depot ships real files only (the
-# packer skips symlinks), so `launch.macos` and `connector.cliBin` both point at the ONE
-# executable inside it — still one binary, two roles.
+# The binary is MOVED in, not copied, and `launch.macos` and `cliBin` are rewritten to
+# point inside — still one binary, two roles.
 macos_app_bundle() { # <dist> <cli> <display-name> <id> <version> <src-icon-png> -> prints inner exec path
   _d=$1; _cli=$2; _name=$3; _id=$4; _ver=$5; _icon=$6
   _app="$_d/bin/$_name.app"
