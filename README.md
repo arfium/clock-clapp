@@ -11,7 +11,7 @@ a scheduler is just an app that fires signals.**
   (`Store`), so an alarm the agent sets shows up in your window instantly, and
   one you set reaches the agent as an `alarm.set` signal.
 
-clock is a **clapp** on the frozen [Clapp Protocol](docs/protocol.md) — same
+clock is a **clapp** on the frozen [Clapp Protocol](clappkit/docs/protocol.md) — same
 two-channel wiring (GUI↔CLI socket + Clatch control pipe), with a domain of alarms
 and timers and a 1-second scheduler loop.
 
@@ -203,7 +203,7 @@ clatch.json              the manifest: id, launch, the declared verbs and signal
 The plumbing is nobody's business but clappkit's — the control pipe (`app.toAgent`,
 `app.register {instanceToken}`, fail-fast framing), the private IPC transport, the
 data-dir resolver, the atomic store writer, the window verbs, and the roster
-projection. All of it speaks the frozen [Clapp Protocol](docs/protocol.md).
+projection. All of it speaks the frozen [Clapp Protocol](clappkit/docs/protocol.md).
 
 ## Files worth reading
 
@@ -212,6 +212,6 @@ projection. All of it speaks the frozen [Clapp Protocol](docs/protocol.md).
 - [`native/Sources/clock/ClockStore.swift`](native/Sources/clock/ClockStore.swift) —
   the Swift original the above is a port of; the behavioural reference.
 - [`AGENTS.md`](AGENTS.md) — how an agent operates clock.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the clapp model in general.
-- [`docs/ICONS.md`](docs/ICONS.md) · [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md) — the house
+- [`clappkit/docs/ARCHITECTURE.md`](clappkit/docs/ARCHITECTURE.md) — the clapp model in general.
+- [`clappkit/docs/ICONS.md`](clappkit/docs/ICONS.md) · [`clappkit/docs/PLAYBOOK.md`](clappkit/docs/PLAYBOOK.md) — the house
   standards this app is held to.

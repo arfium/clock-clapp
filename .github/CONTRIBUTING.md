@@ -2,11 +2,11 @@
 
 clock is a **clapp**: one binary with two roles (a Tauri window for the human, a CLI
 for the agent) over one shared state, on the frozen
-[Clapp Protocol](../docs/protocol.md). Keep it small, keep it correct.
+[Clapp Protocol](../clappkit/docs/protocol.md). Keep it small, keep it correct.
 
 ## Ground rules
 
-- **The protocol wins.** [`docs/protocol.md`](../docs/protocol.md) is the normative
+- **The protocol wins.** [`clappkit/docs/protocol.md`](../clappkit/docs/protocol.md) is the normative
   contract for every point between Clatch and this app — the manifest and the control
   pipe. Clatch implements it; on any conflict, the protocol is right and we are wrong.
 - **Three surfaces must agree.** `clatch.json`'s `connector.commands`, the verbs
