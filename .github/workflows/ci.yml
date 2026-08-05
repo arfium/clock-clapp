@@ -1,24 +1,23 @@
-# CI: prove the app still compiles, tests and packages on every OS its manifest claims.
+# CI: does this still compile, test and package on the platforms we ship?
 #
-# `clatch.json`'s `launch` keys ARE the platform claim (docs/protocol.md §1), and this app
-# declares macos, windows and linux — so a one-platform gate would let a Windows or Linux
-# break land on the very branch that introduced cross-platform support.
+# macOS and Windows — the two we publish. Linux is skipped on purpose: `launch.linux` stays
+# in the manifest because a source build works there, but nothing here builds or releases
+# it, so treat that key as unproven.
 #
-# ⚠ BLOCKED, STATED PLAINLY: `src-tauri/Cargo.toml` depends on `../../clappkit`, which in
-#   turn depends on `../../clatch/crates/*` — sibling checkouts that are not (yet) git
-#   repositories this workflow can fetch. Until they are, set the repository variables
-#   CLAPPKIT_REPO and CLATCH_REPO (e.g. `arfium/clappkit`, `arfium/clatch`) and this
-#   workflow works as written; without them the sibling step fails fast and says so
-#   rather than pretending a build happened. Do not "fix" it by deleting the matrix.
+# ONE JOB PER PLATFORM. The manifest check and the offline proof ride along on macOS rather
+# than taking a third runner, and Release triggers on tags only — so no platform is ever
+# built twice for one push.
 #
-# `clatch validate` needs the private Clatch binary, so it is not run here; build + test +
-# package is the gate. The socket round-trip in `npm run verify` needs a desktop session,
-# so it stays a local pre-commit gate.
+# Nothing to configure: clappkit is a PUBLIC submodule and the clatch crates are vendored at
+# their pinned tag, so every job runs on a bare runner with no secret and no key.
+#
+# `clatch validate` needs the private Clatch binary and `npm run verify` needs a desktop
+# session, so both stay local gates. Build + test + package is what CI can honestly assert.
 name: CI
 
 on:
   push:
-    branches: [main, tauri-test]
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -29,71 +28,67 @@ permissions:
   contents: read
 
 jobs:
-  # The self-contained gate: does clatch.json still describe this code? Runs everywhere,
-  # needs no sibling checkout, and is GREEN today — the one agreement nothing else checks.
-  manifest:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: node scripts/check-manifest.mjs
-
-  # The full gate. SKIPPED (not failed) until clappkit and clatch are git repositories the
-  # runner can fetch: set the repository variables CLAPPKIT_REPO and CLATCH_REPO to their
-  # slugs and this runs on all three platforms clatch.json's launch keys claim. A red X
-  # nobody can fix teaches people to ignore CI, so it stays skipped instead.
   build:
-    if: vars.CLAPPKIT_REPO != '' && vars.CLATCH_REPO != ''
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest, ubuntu-22.04]
+        os: [macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash # scripts/*.sh run under Git Bash on windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/checkout@v4
         with:
-          repository: ${{ vars.CLAPPKIT_REPO }}
-          path: _siblings/clappkit
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.CLATCH_REPO }}
-          path: _siblings/clatch
-      - name: Place the sibling crates where Cargo.toml expects them
-        run: |
-          set -eu
-          mkdir -p ../clappkit ../../clatch
-          cp -R _siblings/clappkit/. ../clappkit/
-          cp -R _siblings/clatch/. ../../clatch/
+          submodules: recursive # clappkit — public, so no token
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - uses: dtolnay/rust-toolchain@stable
+
+      # `cache-on-failure` is the difference between a 15-minute Windows build and a
+      # 2-minute one: without it a build that dies saves nothing, so the next attempt
+      # starts from zero.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
-      - name: Linux GUI dependencies (webkit2gtk — Tauri's webview)
-        if: matrix.os == 'ubuntu-22.04'
+      # Defender scans every one of the ~100k files rustc writes; excluding the build
+      # directories is worth roughly a third of the Windows time. The runner is a throwaway.
+      - name: Stop Defender scanning the build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}","$env:USERPROFILE\.cargo","$env:USERPROFILE\.rustup" -ErrorAction SilentlyContinue
+          Write-Host "excluded: workspace, ~/.cargo, ~/.rustup"
 
       - run: npm ci
+
+      # `npm run <script>` spawns cmd.exe on Windows, which cannot run a .sh file.
+      - name: Use bash for npm scripts (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm config set script-shell bash
+
+      - name: Manifest agrees with the code
+        if: matrix.os == 'macos-14'
+        run: node scripts/check-manifest.mjs
+
+      # The proof that no private source is reachable: no network, no lockfile drift. If
+      # this fails, a dependency escaped the vendored copy.
+      - name: Build offline and locked
+        if: matrix.os == 'macos-14'
+        run: cargo build --offline --locked --release --manifest-path src-tauri/Cargo.toml
 
       - name: Test
         run: cargo test --release --manifest-path src-tauri/Cargo.toml
 
-      # Builds the frontend, builds the binary THROUGH the Tauri CLI (so the frontend is
-      # embedded, not fetched from a dev URL), bundles the app's extras, vendors the
-      # host's node, and asserts the manifest and the depot agree.
-      - name: Build + package
-        run: npm run --silent package
+      # Builds the frontend, builds the binary THROUGH the Tauri CLI so the frontend is
+      # embedded rather than fetched from a dev URL, assembles pkg/, and asserts the
+      # manifest and the depot agree.
+      - name: Build to pkg/
+        run: bash scripts/package.sh
+
+      - name: Smoke-test the packaged binary
+        run: sh .github/smoke.sh
