@@ -75,11 +75,17 @@ jobs:
         if: matrix.os == 'macos-14'
         run: node scripts/check-manifest.mjs
 
-      # The proof that no private source is reachable: no network, no lockfile drift. If
-      # this fails, a dependency escaped the vendored copy.
-      - name: Build offline and locked
+      # THE PROOF that nothing private is reachable. This runner holds no ssh key, so if
+      # the [patch] in Cargo.toml ever stopped redirecting clappkit's clatch dependency to
+      # vendor/clatch, cargo would try `ssh://git@github.com/arfium/clatch.git` here and
+      # fail on authentication. `--locked` adds that the lockfile is honest.
+      #
+      # NOT `--offline`: that also forbids crates.io, which a fresh runner has never
+      # downloaded — it passes locally only because a developer's registry cache is warm.
+      # Offline is the stronger LOCAL check; keyless resolution is the one CI can make.
+      - name: Resolve every dependency with no key
         if: matrix.os == 'macos-14'
-        run: cargo build --offline --locked --release --manifest-path src-tauri/Cargo.toml
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Test
         run: cargo test --release --manifest-path src-tauri/Cargo.toml
