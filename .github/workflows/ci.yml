@@ -4,9 +4,9 @@
 # in the manifest because a source build works there, but nothing here builds or releases
 # it, so treat that key as unproven.
 #
-# ONE JOB PER PLATFORM. The manifest check and the offline proof ride along on macOS rather
-# than taking a third runner, and Release triggers on tags only — so no platform is ever
-# built twice for one push.
+# ONE JOB PER PLATFORM. The manifest check and the keyless-resolution proof ride along on
+# macOS rather than taking a third runner, and Release triggers on tags only — so no
+# platform is ever built twice for one push.
 #
 # Nothing to configure: clappkit is a PUBLIC submodule and the clatch crates are vendored at
 # their pinned tag, so every job runs on a bare runner with no secret and no key.
