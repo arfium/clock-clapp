@@ -59,7 +59,13 @@ mkdir -p "$DIST/bin" "$DIST/$(dirname -- "$ICON")"
 cp "$BIN" "$DIST/bin/$CLI$EXE"
 [ -n "$EXE" ] || chmod +x "$DIST/bin/$CLI"
 
-cp "$ROOT/$ICON" "$DIST/$ICON"
+# Everything the manifest promises: the icon, and a banner or photos if declared.
+manifest_assets | while IFS= read -r asset; do
+  [ -n "$asset" ] || continue
+  [ -f "$ROOT/$asset" ] || fail "clatch.json declares $asset, which is not in this repo"
+  mkdir -p "$DIST/$(dirname -- "$asset")"
+  cp "$ROOT/$asset" "$DIST/$asset"
+done
 if [ -f "$ROOT/THIRD_PARTY_NOTICES.md" ]; then
   cp "$ROOT/THIRD_PARTY_NOTICES.md" "$DIST/THIRD_PARTY_NOTICES.md"
 fi
@@ -91,7 +97,7 @@ step "self-check"
 [ -x "$DIST/${INNER:-bin/$CLI$EXE}" ] || fail "$DEPOT/${INNER:-bin/$CLI$EXE} is missing or not executable"
 for declared in "$(manifest_path "$DIST/clatch.json" cliBin "$OS")" \
                 "$(manifest_path "$DIST/clatch.json" launch "$OS")" \
-                "$(manifest_path "$DIST/clatch.json" icon "$OS")"; do
+                $(manifest_assets); do
   [ -z "$declared" ] || [ -e "$DIST/$declared" ] \
     || fail "the manifest declares $declared, which is not in the depot"
 done
