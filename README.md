@@ -83,8 +83,8 @@ bundle really is embedded, so that cannot ship by accident.
 No source checkout — install from a published GitHub release:
 
 ```sh
-clatch install github:arfium/clock-clapp          # latest release
-clatch install github:arfium/clock-clapp@v0.2.0   # a specific version
+clatch install arfium/clock-clapp          # latest release
+clatch install arfium/clock-clapp@v0.2.0   # a specific version
 ```
 
 (Or download `com.arfium.clock-macos-arm64.clapp` from the repo's **Releases** and
