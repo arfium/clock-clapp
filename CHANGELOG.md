@@ -55,7 +55,7 @@ bumps may break (SemVer 0.x rules).
   through the *packaged* binary. clock never had this gate. Plus `scripts/render-icon.sh`
   (regenerates `assets/icon.png` **and** the stale-prone `src-tauri/icons/icon.ico` from
   one source) and the shared `scripts/lib.sh` every clapp script now reads identity from.
-- `clappkit/docs/ICONS.md` and `clappkit/docs/PLAYBOOK.md` — the house standards this app is held to were
+- `clappkit/docs/icons.md` and `clappkit/docs/playbook.md` — the house standards this app is held to were
   only readable in the template.
 - `.claude/` with the Tauri-era command allowlist, and a `CHANGELOG.md` (this file).
 

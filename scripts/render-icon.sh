@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # `npm run icon` — regenerate BOTH of this app's marks from their one source.
 #
-#   assets/icon.png          the 1024² shelf tile clatch.json declares (docs/ICONS.md)
+#   assets/icon.png          the 1024² shelf tile clatch.json declares (docs/icons.md)
 #   src-tauri/icons/icon.ico the Windows executable resource tauri-build embeds
 #
 # clock's tile is not a placeholder monogram: it is drawn to Apple's own measured

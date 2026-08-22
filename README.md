@@ -212,6 +212,6 @@ projection. All of it speaks the frozen [Clapp Protocol](clappkit/docs/protocol.
 - [`native/Sources/clock/ClockStore.swift`](native/Sources/clock/ClockStore.swift) —
   the Swift original the above is a port of; the behavioural reference.
 - [`AGENTS.md`](AGENTS.md) — how an agent operates clock.
-- [`clappkit/docs/ARCHITECTURE.md`](clappkit/docs/ARCHITECTURE.md) — the clapp model in general.
-- [`clappkit/docs/ICONS.md`](clappkit/docs/ICONS.md) · [`clappkit/docs/PLAYBOOK.md`](clappkit/docs/PLAYBOOK.md) — the house
+- [`clappkit/docs/architecture.md`](clappkit/docs/architecture.md) — the clapp model in general.
+- [`clappkit/docs/icons.md`](clappkit/docs/icons.md) · [`clappkit/docs/playbook.md`](clappkit/docs/playbook.md) — the house
   standards this app is held to.
