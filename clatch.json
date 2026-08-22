@@ -1,44 +1,107 @@
 {
   "manifestVersion": 1,
+  "type": "clapp",
   "id": "com.arfium.clock",
   "name": "Clock",
   "description": "A native clock — alarms and timers your agent sets for itself, and you set in the GUI.",
   "about": "Clatch has no cron; a scheduler is just an app that fires signals. Clock is that app, built like a real clock: a live analog face, drum-wheel alarms, and a countdown timer. The agent schedules its own alarms and timers over the CLI, the human sets them in the GUI, and when one is due it fires a run-type signal that wakes the agent(s) the alarm targets — chosen in the GUI (or with --to), defaulting to whoever set it.",
-  "tags": ["utility", "productivity", "scheduler"],
+  "tags": [
+    "utility",
+    "productivity",
+    "scheduler"
+  ],
   "version": "0.2.0",
   "protocol": 2,
   "icon": "assets/icon.png",
   "launch": {
     "macos": "bin/clock",
     "windows": "bin/clock.exe",
-    "linux": "bin/clock",
-    "args": ["app"]
+    "args": [
+      "app"
+    ]
   },
   "connector": {
     "cli": "clock",
     "cliBin": "bin/clock",
     "commands": [
-      { "name": "now", "about": "print the current time" },
-      { "name": "list", "about": "list all alarms and timers (shows who each wakes)" },
-      { "name": "state", "about": "alias for list" },
-      { "name": "alarm", "about": "set an alarm at a wall-clock time; --note is your prompt for the turn it wakes, --repeat daily|weekdays|weekends|mon,wed,fri, --to picks which agent(s) it wakes, --quiet fires as context without a turn" },
-      { "name": "edit", "about": "change an alarm; omitted flags keep their value (--time --label --note --repeat --quiet --wake --to)" },
-      { "name": "timer", "about": "start a countdown (10m, 1h30m, 90s) — fires timer.done when it ends" },
-      { "name": "set", "about": "shorthand: a clock time makes an alarm, a duration a timer" },
-      { "name": "cancel", "about": "remove an alarm (aN) or timer (tN)" },
-      { "name": "toggle", "about": "enable / disable an alarm" },
-      { "name": "pause", "about": "pause a timer" },
-      { "name": "resume", "about": "resume a timer" },
-      { "name": "focus", "about": "open the window (same as show)" },
-      { "name": "show", "about": "open the window (same as focus)" },
-      { "name": "hide", "about": "send it back to the background — the alarms keep running" },
-      { "name": "close", "about": "quit the app — this is what stops the alarms" }
+      {
+        "name": "now",
+        "about": "print the current time"
+      },
+      {
+        "name": "list",
+        "about": "list all alarms and timers (shows who each wakes)"
+      },
+      {
+        "name": "state",
+        "about": "alias for list"
+      },
+      {
+        "name": "alarm",
+        "about": "set an alarm at a wall-clock time; --note is your prompt for the turn it wakes, --repeat daily|weekdays|weekends|mon,wed,fri, --to picks which agent(s) it wakes, --quiet fires as context without a turn"
+      },
+      {
+        "name": "edit",
+        "about": "change an alarm; omitted flags keep their value (--time --label --note --repeat --quiet --wake --to)"
+      },
+      {
+        "name": "timer",
+        "about": "start a countdown (10m, 1h30m, 90s) — fires timer.done when it ends"
+      },
+      {
+        "name": "set",
+        "about": "shorthand: a clock time makes an alarm, a duration a timer"
+      },
+      {
+        "name": "cancel",
+        "about": "remove an alarm (aN) or timer (tN)"
+      },
+      {
+        "name": "toggle",
+        "about": "enable / disable an alarm"
+      },
+      {
+        "name": "pause",
+        "about": "pause a timer"
+      },
+      {
+        "name": "resume",
+        "about": "resume a timer"
+      },
+      {
+        "name": "focus",
+        "about": "open the window (same as show)"
+      },
+      {
+        "name": "show",
+        "about": "open the window (same as focus)"
+      },
+      {
+        "name": "hide",
+        "about": "send it back to the background — the alarms keep running"
+      },
+      {
+        "name": "close",
+        "about": "quit the app — this is what stops the alarms"
+      }
     ],
     "signals": [
-      { "id": "alarm.fired", "type": "run" },
-      { "id": "alarm.quiet", "type": "context" },
-      { "id": "alarm.set", "type": "context" },
-      { "id": "timer.done", "type": "run" }
+      {
+        "id": "alarm.fired",
+        "type": "run"
+      },
+      {
+        "id": "alarm.quiet",
+        "type": "context"
+      },
+      {
+        "id": "alarm.set",
+        "type": "context"
+      },
+      {
+        "id": "timer.done",
+        "type": "run"
+      }
     ]
   }
 }

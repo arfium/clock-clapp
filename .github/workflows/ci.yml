@@ -1,8 +1,8 @@
 # CI: does this still compile, test and package on the platforms we ship?
 #
-# macOS and Windows — the two we publish. Linux is skipped on purpose: `launch.linux` stays
-# in the manifest because a source build works there, but nothing here builds or releases
-# it, so treat that key as unproven.
+# macOS and Windows — the two we publish, and the two the manifest claims. The OS keys in
+# `launch` ARE the advertised platforms (clappkit/docs/format.md § Distribution), so a
+# platform nothing here builds is a platform the manifest must not name.
 #
 # ONE JOB PER PLATFORM. The manifest check and the keyless-resolution proof ride along on
 # macOS rather than taking a third runner, and Release triggers on tags only — so no
