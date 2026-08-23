@@ -20,17 +20,3 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-
-# clappkit pins the clatch crates to a PRIVATE repository over ssh://. Building this app
-# must not depend on holding a key for it — not on a CI runner, not on a fresh machine, not
-# in five years — so the crates are vendored at the tag clappkit pins (vendor/clatch, copied
-# verbatim from v0.4.3) and this patch points cargo at that copy.
-#
-# The URL must match clappkit's dependency URL character for character; that is how cargo
-# knows which source it is replacing. Refresh with scripts/vendor-clatch.sh <tag>.
-# `cargo build --offline --locked` is the standing proof that nothing private is reached.
-[patch."ssh://git@github.com/arfium/clatch.git"]
-clatch-core     = { path = "../vendor/clatch/crates/clatch-core" }
-clatch-ipc      = { path = "../vendor/clatch/crates/clatch-ipc" }
-clatch-pipe     = { path = "../vendor/clatch/crates/clatch-pipe" }
-clatch-registry = { path = "../vendor/clatch/crates/clatch-registry" }
