@@ -1,6 +1,6 @@
 [package]
 name = "clock"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A shared clock for you and your agent — alarms and timers — cross-platform via clappkit + Tauri."
 license = "Apache-2.0"

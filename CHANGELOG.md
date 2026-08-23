@@ -4,7 +4,7 @@ All notable changes to **clock**. Format:
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: pre-1.0, minor
 bumps may break (SemVer 0.x rules).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-23
 
 ### Changed
 
