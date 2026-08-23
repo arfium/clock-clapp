@@ -3,10 +3,10 @@
 //! CLI (clappkit IPC) mutate it through the SAME `handle` method, so the two surfaces
 //! never drift — "share state, not screens". Portable Rust; no platform code.
 //!
-//! This is a 1:1 port of the Swift `ClockStore` (native/Sources/clock/ClockStore.swift
-//! + ClockStore+View.swift + TimeParse.swift): weekday-set repeats (1=Sun … 7=Sat),
+//! This is a 1:1 port of the Swift `ClockStore` (`ClockStore.swift`, `ClockStore+View.swift`
+//! and `TimeParse.swift` under native/Sources/clock): weekday-set repeats (1=Sun … 7=Sat),
 //! the per-alarm `lastFired` minute guard, one-shot auto-disable, quiet-vs-wake signal
-//! IDS, id-based targets resolved to names only for display, and the same on-disk
+//! ids, id-based targets resolved to names only for display, and the same on-disk
 //! shape (`{ alarms, timers, nextA, nextT }`) so an existing ~/.clock/clock.json loads.
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, SecondsFormat, TimeZone, Timelike, Utc};
