@@ -3,8 +3,8 @@
   "type": "clapp",
   "id": "com.arfium.clock",
   "name": "Clock",
-  "description": "A native clock — alarms and timers your agent sets for itself, and you set in the GUI.",
-  "about": "Clatch has no cron; a scheduler is just an app that fires signals. Clock is that app, built like a real clock: a live analog face, drum-wheel alarms, and a countdown timer. The agent schedules its own alarms and timers over the CLI, the human sets them in the GUI, and when one is due it fires a run-type signal that wakes the agent(s) the alarm targets — chosen in the GUI (or with --to), defaulting to whoever set it.",
+  "description": "Alarms and timers, set in the window or by your agent.",
+  "about": "A clock with a live analog face, alarms on drum wheels, and a countdown timer. Set an alarm yourself or let an agent set one for itself, and when it goes off it wakes whichever agents it was set for, which you choose when you create it. Timers work the same way from either side and both of you watch the same countdown. Closing the window does not stop the clock. It keeps running in the background, so an alarm you set this morning still goes off this afternoon.",
   "tags": [
     "utility",
     "productivity",
