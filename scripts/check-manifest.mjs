@@ -65,15 +65,17 @@ for (const f of ["id", "name", "description", "version"]) {
 }
 const launchKeys = Object.keys(manifest.launch ?? {}).filter((k) => k !== "args");
 check(launchKeys.length > 0, "clatch.json: launch needs at least one per-OS command");
-// The advertised platforms ARE the launch keys, and Windows will not run an
-// extensionless image — a `windows` launch without `.exe` is a claim that cannot hold.
+// In the repo the launch keys are the OSes you build; the shipped depot keeps only its
+// own (install_manifest in lib.sh). Windows will not run an extensionless image — a
+// `windows` launch without `.exe` is a claim that cannot hold.
 if (manifest.launch?.windows) {
   check(manifest.launch.windows.endsWith(".exe"), "launch.windows must name a .exe");
 }
 
-// ── 1b. every advertised platform is a platform the release actually ships ───────────
-// The OS keys in `launch` ARE the advertised platforms (clappkit/docs/format.md
-// § Distribution), and the launcher only finds that out at install, in front of a user:
+// ── 1b. every OS you list to build is one the release actually builds ────────────────
+// The launch keys are your build targets — one command per OS. Coverage across a release
+// is the asset grid (clappkit/docs/format.md § 10. Distribution), not this list; a target
+// with no depot surfaces only at install, in front of a user:
 // `no .clapp for linux-x64 in this release`. The release workflow's matrix is the list of
 // depots that will exist, so the two are checkable against each other right here.
 //
@@ -85,8 +87,8 @@ if (fs.existsSync(path.join(ROOT, releaseYml))) {
     [...read(releaseYml).matchAll(/^\s*target:\s*(macos|windows|linux)-\w+/gm)].map((m) => m[1]),
   );
   for (const os of launchKeys) {
-    check(shipped.has(os), `clatch.json advertises \`launch.${os}\`, which ${releaseYml} never builds ` +
-      "— drop the key or ship the depot");
+    check(shipped.has(os), `clatch.json lists \`launch.${os}\`, which ${releaseYml} never builds ` +
+      "— drop the key or add the build");
   }
 }
 
