@@ -84,7 +84,17 @@ install_manifest() { # <src> <dst> <cliBin> [launch-os] [launch-path]
     if (m.connector) m.connector.cliBin = cliBin;
     // The macOS depot puts the binary inside a .app bundle, so BOTH the launch command
     // and the CLI path move with it — they are two roles of the one executable.
-    if (os && launch && m.launch) m.launch[os] = launch;
+    // A depot is one platform, so its manifest carries exactly ONE launch OS key: the one
+    // this depot runs on. Keep that entry (rewritten for the .app bundle when a path is
+    // given) plus args, and drop every other OS key so the .clapp names only its platform.
+    if (m.launch) {
+      const only = os || { darwin: "macos", win32: "windows", linux: "linux" }[process.platform];
+      m.launch = Object.assign(
+        {},
+        only ? { [only]: launch || m.launch[only] } : {},
+        m.launch.args !== undefined ? { args: m.launch.args } : {},
+      );
+    }
     fs.writeFileSync(dst, JSON.stringify(m, null, 2) + "\n");
   ' "$1" "$2" "$3" "${4:-}" "${5:-}"
 }
