@@ -18,11 +18,11 @@
 #
 # CROSS-PLATFORM. Written for macOS, Linux, and Windows under Git Bash / MSYS2 — the
 # shell Git for Windows installs, which is also what `npm` already assumes there, so
-# no second implementation is needed. HONESTY: the Windows branches (.exe suffix,
-# node.exe vendoring, the cliBin rewrite, skipping chmod) are reasoned from the
-# platform's rules and from Clatch's own installer, NOT executed — this repo's
-# packaging has only ever been RUN on macOS. A green macOS run is not a Windows
-# guarantee. Anyone with a Windows box should run this and report back.
+# no second implementation is needed. The Windows branches (.exe suffix, node.exe
+# vendoring, the cliBin rewrite, skipping chmod) were reasoned from the platform's
+# rules and from Clatch's own installer, and on 2026-09-21 they were RUN: this repo
+# built, packaged, validated, packed and round-tripped on a real Windows machine,
+# and the binary carries no VCRUNTIME140 import. Linux is still reasoned, not run.
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
